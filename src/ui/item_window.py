@@ -216,7 +216,11 @@ class ItemWindow(QWidget):
         self.item_list.clear()
         items = self.item_service.get_all_items()
         for i in items:
-            self.item_list.addItem(f"{i['id']} - {i['name']}")
+            # Access by index for compatibility with packaged app
+            item_id = i[0] if isinstance(i, (tuple, list)) else i['id']
+            item_name = i[1] if isinstance(i, (tuple, list)) else i['name']
+            self.item_list.addItem(f"{item_id} - {item_name}")
+
 
     def add_item(self):
         name = self.name_input.text().strip()

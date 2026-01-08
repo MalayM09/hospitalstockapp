@@ -379,7 +379,9 @@ class EditBillDialog(QDialog):
         grid.addWidget(self.create_label("Vendor"), 0, 0)
         self.vendor_combo = QComboBox()
         for v in self.vendor_service.get_all_vendors():
-            self.vendor_combo.addItem(v['name'], v['id'])
+            vendor_id = v[0] if isinstance(v, (tuple, list)) else v['id']
+            vendor_name = v[1] if isinstance(v, (tuple, list)) else v['name']
+            self.vendor_combo.addItem(vendor_name, vendor_id)
         self.vendor_combo.setCurrentIndex(self.vendor_combo.findData(self.bill['vendor_id']))
         grid.addWidget(self.vendor_combo, 0, 1)
 

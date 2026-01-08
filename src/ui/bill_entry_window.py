@@ -407,7 +407,10 @@ class BillEntryWindow(QWidget):
             self.vendor_dropdown.addItem("No vendors found", None)
             return
         for v in vendors:
-            self.vendor_dropdown.addItem(v["name"], v["id"])
+            # Access by index for compatibility with packaged app
+            vendor_id = v[0] if isinstance(v, (tuple, list)) else v["id"]
+            vendor_name = v[1] if isinstance(v, (tuple, list)) else v["name"]
+            self.vendor_dropdown.addItem(vendor_name, vendor_id)
 
     def load_items(self):
         self.item_dropdown.clear()
@@ -416,7 +419,11 @@ class BillEntryWindow(QWidget):
             self.item_dropdown.addItem("No items found", None)
             return
         for item in items:
-            self.item_dropdown.addItem(item["name"], item["id"])
+            # Access by index for compatibility with packaged app
+            item_id = item[0] if isinstance(item, (tuple, list)) else item["id"]
+            item_name = item[1] if isinstance(item, (tuple, list)) else item["name"]
+            self.item_dropdown.addItem(item_name, item_id)
+
 
     def save_bill(self):
         item_id = self.item_dropdown.currentData()

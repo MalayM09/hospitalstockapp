@@ -216,7 +216,11 @@ class VendorWindow(QWidget):
         self.vendor_list.clear()
         vendors = self.vendor_service.get_all_vendors()
         for v in vendors:
-            self.vendor_list.addItem(f"{v['id']} - {v['name']}")
+            # Access by index for compatibility with packaged app
+            vendor_id = v[0] if isinstance(v, (tuple, list)) else v['id']
+            vendor_name = v[1] if isinstance(v, (tuple, list)) else v['name']
+            self.vendor_list.addItem(f"{vendor_id} - {vendor_name}")
+
 
     def add_vendor(self):
         name = self.name_input.text().strip()

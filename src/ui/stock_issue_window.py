@@ -244,7 +244,10 @@ class StockIssueWindow(QWidget):
         self.item_dropdown.clear()
         items = self.item_service.get_all_items()
         for item in items:
-            self.item_dropdown.addItem(item["name"], item["id"])
+            # Access by index for compatibility with packaged app
+            item_id = item[0] if isinstance(item, (tuple, list)) else item["id"]
+            item_name = item[1] if isinstance(item, (tuple, list)) else item["name"]
+            self.item_dropdown.addItem(item_name, item_id)
         self.update_balance_display()
 
     def update_balance_display(self):
