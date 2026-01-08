@@ -1,0 +1,78 @@
+# GitHub Actions Workflow: Build Windows Executable
+# This workflow builds a standalone .exe for Windows when you push to main branch
+# or create a release
+
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [created]
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller hospital_stock_app.spec --clean
+
+    - name: List output files
+      run: |
+        dir dist
+        
+    - name: Upload Windows Executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: HospitalStockApp-Windows
+        path: dist/HospitalStockApp.exe
+        retention-days: 30
+
+  # Optional: Also build for Mac (you can remove this if not needed)
+  build-mac:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller hospital_stock_app.spec --clean
+
+    - name: Upload Mac Executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: HospitalStockApp-Mac
+        path: dist/HospitalStockApp
+        retention-days: 30

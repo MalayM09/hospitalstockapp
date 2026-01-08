@@ -1,0 +1,15 @@
+# Hospital Stock Management App - Dependencies
+# Python 3.10+ required
+
+# GUI Framework
+PyQt6>=6.5.0
+
+# Password hashing
+bcrypt>=4.0.0
+
+# Data processing and Excel export
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# For building executables (dev only)
+pyinstaller>=6.0.0
