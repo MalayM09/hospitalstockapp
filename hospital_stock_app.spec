@@ -57,6 +57,10 @@ a = Analysis(
         # Model modules
         'models',
         'models.init_db',
+        'models.seed_data',
+        # Utils modules
+        'utils',
+        'utils.db_path',
     ],
     hookspath=[],
     hooksconfig={},

@@ -2,22 +2,11 @@ import sqlite3
 from pathlib import Path
 import sys
 
-
-def get_db_path():
-    """Return DB path based on execution mode (dev vs packaged)."""
-    if getattr(sys, 'frozen', False):  # PyInstaller bundled
-        base_dir = Path.home() / "Library/Application Support/HospitalStockApp"
-        # For Windows, use AppData
-        if sys.platform == 'win32':
-            base_dir = Path.home() / "AppData/Local/HospitalStockApp"
-        base_dir.mkdir(parents=True, exist_ok=True)
-        return base_dir / "hospital.db"
-    else:
-        # normal development mode
-        return Path(__file__).resolve().parents[2] / "data" / "hospital.db"
+# Import centralized database path utility
+from utils.db_path import get_database_path
 
 
-DB_PATH = get_db_path()
+DB_PATH = get_database_path()
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)

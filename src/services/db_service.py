@@ -2,21 +2,13 @@ import sqlite3
 from pathlib import Path
 import sys
 
-
-def app_data_path():
-    """Return DB path based on execution mode (dev vs packaged)."""
-    if getattr(sys, 'frozen', False):  # PyInstaller bundled
-        base_dir = Path.home() / "Library/Application Support/HospitalStockApp"
-        base_dir.mkdir(parents=True, exist_ok=True)
-        return base_dir / "hospital.db"
-    else:
-        # normal development mode
-        return Path(__file__).resolve().parents[2] / "data" / "hospital.db"
+# Import centralized database path utility
+from utils.db_path import get_database_path
 
 
 class DatabaseService:
     def __init__(self):
-        self.db_path = app_data_path()
+        self.db_path = get_database_path()
         self.conn = None
         self.backup_service = None
         self.connect()
