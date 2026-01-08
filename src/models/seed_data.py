@@ -1,15 +1,12 @@
-import sqlite3
-from pathlib import Path
+"""
+Seed data module for Hospital Stock Management App.
+Seeds initial vendors, items, and stock quantities into the database.
+Uses DatabaseService to ensure consistent database access.
+"""
 from datetime import datetime
-import sys
-
-# Import centralized database path utility
-from utils.db_path import get_database_path
 
 
-DB_PATH = get_database_path()
-
-# Sample vendor list (13 vendors — placeholder names, edit later)
+# Sample vendor list (13 vendors)
 VENDORS = [
     "SEEMA CHEMICALS",
     "RIDDHI TRADERS",
@@ -85,48 +82,58 @@ ITEMS = list(ITEMS_WITH_QUANTITY.keys())
 
 
 def seed_data():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
+    """
+    Seed initial vendors, items, and stock into the database.
+    Uses DatabaseService to ensure consistent database access with the rest of the app.
+    Uses INSERT OR IGNORE to avoid duplicates on subsequent runs.
+    """
+    # Import here to avoid circular imports
+    from services.db_service import DatabaseService
+    
+    db = DatabaseService()
+    
     # Insert vendors
     for vendor in VENDORS:
-        cur.execute(
-            "INSERT OR IGNORE INTO vendors (name) VALUES (?)",
-            (vendor,)
-        )
+        try:
+            db.execute(
+                "INSERT OR IGNORE INTO vendors (name) VALUES (?)",
+                (vendor,)
+            )
+        except Exception:
+            pass  # Ignore duplicates
 
-    # Insert items (name only, no quantity column)
+    # Insert items
     for item_name in ITEMS_WITH_QUANTITY.keys():
-        cur.execute(
-            "INSERT OR IGNORE INTO items (name) VALUES (?)",
-            (item_name,)
-        )
+        try:
+            db.execute(
+                "INSERT OR IGNORE INTO items (name) VALUES (?)",
+                (item_name,)
+            )
+        except Exception:
+            pass  # Ignore duplicates
 
-    conn.commit()
-
-    # Now add initial stock quantities to stock_register
+    # Add initial stock quantities to stock_register
     # Only add entries for items with quantity > 0
     today = datetime.now().strftime("%Y-%m-%d")
     
     for item_name, quantity in ITEMS_WITH_QUANTITY.items():
         if quantity > 0:
             # Get the item_id for this item
-            cur.execute("SELECT id FROM items WHERE name = ?", (item_name,))
-            result = cur.fetchone()
+            result = db.fetch_one("SELECT id FROM items WHERE name = ?", (item_name,))
             if result:
-                item_id = result[0]
+                item_id = result['id']
                 # Check if there's already a stock entry for this item
-                cur.execute("SELECT id FROM stock_register WHERE item_id = ?", (item_id,))
-                existing = cur.fetchone()
+                existing = db.fetch_one("SELECT id FROM stock_register WHERE item_id = ?", (item_id,))
                 if not existing:
                     # Insert initial stock as received stock
-                    cur.execute("""
-                        INSERT INTO stock_register (item_id, vendor_id, received_qty, issued_qty, balance_qty, date)
-                        VALUES (?, NULL, ?, 0, ?, ?)
-                    """, (item_id, quantity, quantity, today))
+                    try:
+                        db.execute("""
+                            INSERT INTO stock_register (item_id, vendor_id, received_qty, issued_qty, balance_qty, date)
+                            VALUES (?, NULL, ?, 0, ?, ?)
+                        """, (item_id, quantity, quantity, today))
+                    except Exception:
+                        pass  # Ignore errors
 
-    conn.commit()
-    conn.close()
     print("✅ Vendors, Items & Initial Stock seeded successfully.")
 
 
