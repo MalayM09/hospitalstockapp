@@ -93,6 +93,10 @@ def main():
     # Ensure database exists
     ensure_db()
     
+    # Seed initial data (vendors, items, initial stock)
+    from models.seed_data import seed_data
+    seed_data()
+    
     # Start the PyQt6 application
     app = QApplication(sys.argv)
     
