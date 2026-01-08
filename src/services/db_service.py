@@ -53,11 +53,21 @@ class DatabaseService:
             raise e
 
     def fetch_all(self, query, params=None):
+        """Fetch all rows and convert to dictionaries for reliable access."""
         cur = self.conn.cursor()
         cur.execute(query, params or [])
-        return cur.fetchall()
+        rows = cur.fetchall()
+        # Convert sqlite3.Row objects to dictionaries for reliable key access
+        if rows and hasattr(rows[0], 'keys'):
+            return [dict(row) for row in rows]
+        return rows
 
     def fetch_one(self, query, params=None):
+        """Fetch one row and convert to dictionary for reliable access."""
         cur = self.conn.cursor()
         cur.execute(query, params or [])
-        return cur.fetchone()
+        row = cur.fetchone()
+        # Convert sqlite3.Row object to dictionary for reliable key access
+        if row and hasattr(row, 'keys'):
+            return dict(row)
+        return row
