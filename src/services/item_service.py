@@ -1,10 +1,10 @@
-from services.db_service import DatabaseService
+from services.db_service import get_db
 import sqlite3
 
 
 class ItemService:
     def __init__(self):
-        self.db = DatabaseService()
+        self.db = get_db()
 
     def get_all_items(self):
         """Get all items ordered by name."""

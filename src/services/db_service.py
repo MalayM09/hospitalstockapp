@@ -1,9 +1,26 @@
+"""
+Database service module for Hospital Stock Management App.
+Provides a singleton database connection to ensure all parts of the app
+use the same database and connection.
+"""
 import sqlite3
 from pathlib import Path
 import sys
 
 # Import centralized database path utility
 from utils.db_path import get_database_path
+
+
+# Singleton database connection
+_db_instance = None
+
+
+def get_db():
+    """Get the singleton database instance."""
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = DatabaseService()
+    return _db_instance
 
 
 class DatabaseService:
@@ -20,7 +37,11 @@ class DatabaseService:
         self.backup_service = BackupService(self.db_path)
 
     def connect(self):
-        self.conn = sqlite3.connect(self.db_path)
+        """Create database connection with proper settings."""
+        # Ensure the directory exists
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        self.conn = sqlite3.connect(str(self.db_path))
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.row_factory = sqlite3.Row
 
@@ -45,7 +66,10 @@ class DatabaseService:
             
             # Auto-backup after successful write operations
             if self.backup_service and query.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE')):
-                self.backup_service.create_backup()
+                try:
+                    self.backup_service.create_backup()
+                except Exception:
+                    pass  # Don't fail if backup fails
             
             return cur.lastrowid
         except sqlite3.Error as e:
@@ -53,21 +77,25 @@ class DatabaseService:
             raise e
 
     def fetch_all(self, query, params=None):
-        """Fetch all rows and convert to dictionaries for reliable access."""
+        """Fetch all rows and return as list of dictionaries."""
         cur = self.conn.cursor()
         cur.execute(query, params or [])
         rows = cur.fetchall()
-        # Convert sqlite3.Row objects to dictionaries for reliable key access
-        if rows and hasattr(rows[0], 'keys'):
-            return [dict(row) for row in rows]
-        return rows
+        # Always convert to list of dicts for reliable access
+        result = []
+        for row in rows:
+            if hasattr(row, 'keys'):
+                result.append(dict(row))
+            else:
+                result.append(row)
+        return result
 
     def fetch_one(self, query, params=None):
-        """Fetch one row and convert to dictionary for reliable access."""
+        """Fetch one row and return as dictionary."""
         cur = self.conn.cursor()
         cur.execute(query, params or [])
         row = cur.fetchone()
-        # Convert sqlite3.Row object to dictionary for reliable key access
+        # Always convert to dict for reliable access
         if row and hasattr(row, 'keys'):
             return dict(row)
         return row

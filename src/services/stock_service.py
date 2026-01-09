@@ -1,10 +1,10 @@
-from services.db_service import DatabaseService
+from services.db_service import get_db
 from datetime import datetime
 
 
 class StockService:
     def __init__(self):
-        self.db = DatabaseService()
+        self.db = get_db()
 
     def get_vendors(self):
         """Get all vendors for dropdown selection."""

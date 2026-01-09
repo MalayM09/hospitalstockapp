@@ -8,7 +8,7 @@ from PyQt6.QtGui import QTextDocument
 import pandas as pd
 from datetime import datetime, timedelta
 
-from services.db_service import DatabaseService
+from services.db_service import get_db
 from services.stock_service import StockService
 
 
@@ -19,7 +19,7 @@ class ReportsWindow(QWidget):
         self.setMinimumSize(1200, 800)
         self.setStyleSheet("background-color: #F5F7FA;")
 
-        self.db = DatabaseService()
+        self.db = get_db()
         self.stock_service = StockService()
         self.last_report_df = None
         self.last_report_title = "Report"

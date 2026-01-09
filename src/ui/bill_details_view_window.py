@@ -54,10 +54,10 @@ class BillDetailsViewWindow(QWidget):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(12)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Date", "Vendor", "Invoice No.", "Batch No.",
-            "Qty.", "Amount", "Tax", "Round Off", "Net Amount"
+            "ID", "Date", "Vendor", "Item Name", "Invoice No.", "Batch No.",
+            "Expiry Date", "Qty.", "Amount", "Tax", "Round Off", "Net Amount"
         ])
         self.table.setStyleSheet("""
             QTableWidget {
@@ -186,23 +186,27 @@ class BillDetailsViewWindow(QWidget):
             self.table.setItem(row_idx, 0, QTableWidgetItem(str(record['sr_no'])))
             self.table.setItem(row_idx, 1, QTableWidgetItem(str(record['date'] or '-')))
             self.table.setItem(row_idx, 2, QTableWidgetItem(record['vendor']))
-            self.table.setItem(row_idx, 3, QTableWidgetItem(str(record['invoice_no'] or '-')))
-            self.table.setItem(row_idx, 4, QTableWidgetItem(str(record['batch_no'] or '-')))
-            self.table.setItem(row_idx, 5, QTableWidgetItem(str(record['qty'] or 0)))
-            self.table.setItem(row_idx, 6, QTableWidgetItem(f"₹{record['amount'] or 0}"))
-            self.table.setItem(row_idx, 7, QTableWidgetItem(f"₹{record['tax'] or 0}"))
-            self.table.setItem(row_idx, 8, QTableWidgetItem(f"₹{record['round_off'] or 0}"))
+            self.table.setItem(row_idx, 3, QTableWidgetItem(str(record['item_name'] or '-')))
+            self.table.setItem(row_idx, 4, QTableWidgetItem(str(record['invoice_no'] or '-')))
+            self.table.setItem(row_idx, 5, QTableWidgetItem(str(record['batch_no'] or '-')))
+            self.table.setItem(row_idx, 6, QTableWidgetItem(str(record['expiry_date'] or '-')))
+            self.table.setItem(row_idx, 7, QTableWidgetItem(str(record['qty'] or 0)))
+            self.table.setItem(row_idx, 8, QTableWidgetItem(f"₹{record['amount'] or 0}"))
+            self.table.setItem(row_idx, 9, QTableWidgetItem(f"₹{record['tax'] or 0}"))
+            self.table.setItem(row_idx, 10, QTableWidgetItem(f"₹{record['round_off'] or 0}"))
 
             net_item = QTableWidgetItem(f"₹{record['net_amount'] or 0}")
             net_item.setForeground(Qt.GlobalColor.darkGreen)
-            self.table.setItem(row_idx, 9, net_item)
+            self.table.setItem(row_idx, 11, net_item)
 
             data_for_export.append({
                 'ID': record['sr_no'],
                 'Date': record['date'],
                 'Vendor': record['vendor'],
+                'Item Name': record['item_name'],
                 'Invoice No.': record['invoice_no'],
                 'Batch No.': record['batch_no'],
+                'Expiry Date': record['expiry_date'],
                 'Qty.': record['qty'],
                 'Amount': record['amount'],
                 'Tax': record['tax'],
@@ -215,7 +219,7 @@ class BillDetailsViewWindow(QWidget):
         if not records:
             self.table.setRowCount(1)
             self.table.setItem(0, 0, QTableWidgetItem("No data found"))
-            self.table.setSpan(0, 0, 1, 10)
+            self.table.setSpan(0, 0, 1, 12)
 
     def get_selected_bill_id(self):
         """Get the ID of the selected bill."""
@@ -251,12 +255,12 @@ class BillDetailsViewWindow(QWidget):
                 invoice_number=data['invoice_number'],
                 invoice_date=data['invoice_date'],
                 batch_number=data['batch_number'],
+                expiry_date=data['expiry_date'],
                 quantity=data['quantity'],
                 amount=data['amount'],
                 cgst=data['cgst'],
                 sgst=data['sgst'],
-                round_off=data['round_off'],
-                net_amount=data['net_amount']
+                round_off=data['round_off']
             )
             QMessageBox.information(self, "Success", "Bill updated successfully!")
             self.load_data()
@@ -403,15 +407,25 @@ class EditBillDialog(QDialog):
         self.batch_input = QLineEdit(self.bill['batch_number'] or '')
         grid.addWidget(self.batch_input, 3, 1)
 
+        # Expiry Date
+        grid.addWidget(self.create_label("Expiry Date"), 4, 0)
+        self.expiry_input = QDateEdit()
+        if self.bill.get('expiry_date'):
+            self.expiry_input.setDate(QDate.fromString(self.bill['expiry_date'], "yyyy-MM-dd"))
+        else:
+            self.expiry_input.setDate(QDate.currentDate().addYears(1))
+        self.expiry_input.setCalendarPopup(True)
+        grid.addWidget(self.expiry_input, 4, 1)
+
         # Quantity
-        grid.addWidget(self.create_label("Quantity"), 4, 0)
+        grid.addWidget(self.create_label("Quantity"), 5, 0)
         self.qty_input = QLineEdit(str(self.bill['quantity'] or 0))
-        grid.addWidget(self.qty_input, 4, 1)
+        grid.addWidget(self.qty_input, 5, 1)
 
         # Amount
-        grid.addWidget(self.create_label("Amount"), 5, 0)
+        grid.addWidget(self.create_label("Amount"), 6, 0)
         self.amount_input = QLineEdit(str(self.bill['amount'] or 0))
-        grid.addWidget(self.amount_input, 5, 1)
+        grid.addWidget(self.amount_input, 6, 1)
 
         layout.addLayout(grid)
 
@@ -466,6 +480,7 @@ class EditBillDialog(QDialog):
             'invoice_number': self.invoice_input.text(),
             'invoice_date': self.date_input.date().toString("yyyy-MM-dd"),
             'batch_number': self.batch_input.text(),
+            'expiry_date': self.expiry_input.date().toString("yyyy-MM-dd"),
             'quantity': qty,
             'amount': amount,
             'cgst': self.bill['cgst'] or 0,

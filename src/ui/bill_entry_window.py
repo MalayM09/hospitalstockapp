@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate
 from decimal import Decimal, ROUND_HALF_UP
 
-from services.db_service import DatabaseService
+from services.db_service import get_db
 from services.bill_service import BillService
 from services.vendor_service import VendorService
 from services.item_service import ItemService
@@ -18,7 +18,7 @@ class BillEntryWindow(QWidget):
         self.setMinimumSize(1200, 800)
         self.setStyleSheet("background-color: #F5F7FA;")
 
-        self.db = DatabaseService()
+        self.db = get_db()
         self.bill_service = BillService()
         self.vendor_service = VendorService()
         self.item_service = ItemService()
@@ -101,13 +101,25 @@ class BillEntryWindow(QWidget):
         batch_layout.addWidget(self.batch_number_input)
         row3.addLayout(batch_layout)
 
+        expiry_layout = QVBoxLayout()
+        expiry_layout.addWidget(self.create_label("Expiry Date"))
+        self.expiry_date_input = QDateEdit()
+        self.expiry_date_input.setDate(QDate.currentDate().addYears(1))
+        self.expiry_date_input.setCalendarPopup(True)
+        self.style_date(self.expiry_date_input)
+        expiry_layout.addWidget(self.expiry_date_input)
+        row3.addLayout(expiry_layout)
+        form_layout.addLayout(row3)
+
+        # Quantity row
+        row3b = QHBoxLayout()
         qty_layout = QVBoxLayout()
         qty_layout.addWidget(self.create_label("Quantity"))
         self.quantity_input = self.create_input("0")
         self.quantity_input.textChanged.connect(self.calculate_taxes)
         qty_layout.addWidget(self.quantity_input)
-        row3.addLayout(qty_layout)
-        form_layout.addLayout(row3)
+        row3b.addLayout(qty_layout)
+        form_layout.addLayout(row3b)
 
         # Amount
         form_layout.addWidget(self.create_label("Amount per Unit (₹)"))
@@ -441,6 +453,7 @@ class BillEntryWindow(QWidget):
             invoice_number = self.invoice_number_input.text().strip()
             invoice_date = self.invoice_date_input.date().toString("yyyy-MM-dd")
             batch_number = self.batch_number_input.text().strip()
+            expiry_date = self.expiry_date_input.date().toString("yyyy-MM-dd")
             quantity = int(self.quantity_input.text() or 0)
             amount_per_unit = float(self.amount_input.text() or 0)
             total_amount = quantity * amount_per_unit
@@ -461,6 +474,7 @@ class BillEntryWindow(QWidget):
             invoice_number=invoice_number,
             invoice_date=invoice_date,
             batch_number=batch_number,
+            expiry_date=expiry_date,
             quantity=quantity,
             amount=total_amount,
             cgst=cgst,

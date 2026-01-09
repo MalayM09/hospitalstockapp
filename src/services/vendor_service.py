@@ -1,10 +1,10 @@
-from services.db_service import DatabaseService
+from services.db_service import get_db
 import sqlite3
 
 
 class VendorService:
     def __init__(self):
-        self.db = DatabaseService()
+        self.db = get_db()
 
     def get_all_vendors(self):
         """Get all vendors ordered by name."""

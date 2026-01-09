@@ -1,4 +1,4 @@
-from services.db_service import DatabaseService
+from services.db_service import get_db
 from services.stock_service import StockService
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -6,11 +6,11 @@ from decimal import Decimal, ROUND_HALF_UP
 
 class BillService:
     def __init__(self):
-        self.db = DatabaseService()
+        self.db = get_db()
         self.stock_service = StockService()
 
     def add_bill(self, item_id, vendor_id, invoice_number, invoice_date,
-                 batch_number, quantity, amount, cgst, sgst, round_off=0.0):
+                 batch_number, expiry_date, quantity, amount, cgst, sgst, round_off=0.0):
         """
         Add a new bill with automatic net_amount calculation.
         Also automatically updates stock (receives the quantity into inventory).
@@ -25,13 +25,13 @@ class BillService:
         query = """
         INSERT INTO bills (
             item_id, vendor_id, invoice_number, invoice_date, batch_number,
-            quantity, amount, cgst, sgst, round_off, net_amount, entry_date
+            expiry_date, quantity, amount, cgst, sgst, round_off, net_amount, entry_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         self.db.execute(query, (
             item_id, vendor_id, invoice_number, invoice_date, batch_number,
-            quantity, amount, cgst, sgst, round_off, net_amount, entry_date
+            expiry_date, quantity, amount, cgst, sgst, round_off, net_amount, entry_date
         ))
 
         # 2. Automatically update stock (receive the purchased quantity)
@@ -60,7 +60,7 @@ class BillService:
         """, (bill_id,))
 
     def update_bill(self, bill_id, item_id, vendor_id, invoice_number, invoice_date,
-                    batch_number, quantity, amount, cgst, sgst, round_off=0.0):
+                    batch_number, expiry_date, quantity, amount, cgst, sgst, round_off=0.0):
         """
         Update an existing bill with stock adjustment.
         Reverses old stock and applies new stock to maintain data integrity.
@@ -74,13 +74,13 @@ class BillService:
         query = """
         UPDATE bills SET
             item_id = ?, vendor_id = ?, invoice_number = ?, invoice_date = ?,
-            batch_number = ?, quantity = ?, amount = ?, cgst = ?, sgst = ?,
+            batch_number = ?, expiry_date = ?, quantity = ?, amount = ?, cgst = ?, sgst = ?,
             round_off = ?, net_amount = ?
         WHERE id = ?
         """
         self.db.execute(query, (
             item_id, vendor_id, invoice_number, invoice_date, batch_number,
-            quantity, amount, cgst, sgst, round_off, net_amount, bill_id
+            expiry_date, quantity, amount, cgst, sgst, round_off, net_amount, bill_id
         ))
 
         # Adjust stock if item_id or quantity changed
@@ -131,14 +131,16 @@ class BillService:
         self.db.execute("DELETE FROM bills WHERE id = ?", (bill_id,))
 
     def get_bill_details_view(self):
-        """Get all bills for table display with vendor names."""
+        """Get all bills for table display with vendor names and item names."""
         return self.db.fetch_all("""
             SELECT 
                 b.id as sr_no,
                 b.entry_date as date,
                 v.name as vendor,
+                i.name as item_name,
                 b.invoice_number as invoice_no,
                 b.batch_number as batch_no,
+                b.expiry_date,
                 b.quantity as qty,
                 b.amount,
                 (COALESCE(b.cgst, 0) + COALESCE(b.sgst, 0)) as tax,
@@ -146,5 +148,6 @@ class BillService:
                 b.net_amount
             FROM bills b
             JOIN vendors v ON b.vendor_id = v.id
+            LEFT JOIN items i ON b.item_id = i.id
             ORDER BY b.id ASC
         """)

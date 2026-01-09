@@ -1,11 +1,11 @@
 import bcrypt
 import sqlite3
-from services.db_service import DatabaseService
+from services.db_service import get_db
 
 
 class UserService:
     def __init__(self):
-        self.db = DatabaseService()
+        self.db = get_db()
 
     def hash_password(self, plain_password: str) -> str:
         return bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')

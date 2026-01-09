@@ -1,3 +1,6 @@
+"""
+Hospital Stock Management App - Main Entry Point
+"""
 import sys
 import os
 
@@ -5,16 +8,16 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt6.QtWidgets import QApplication
-from services.db_service import DatabaseService
+from services.db_service import get_db
 from ui.login_window import LoginWindow
 
 
 def ensure_db():
     """
-    Ensure the database schema exists.
-    This matches the schema defined in init_db.py (the source of truth).
+    Ensure the database and all tables exist.
+    Uses the singleton database instance for consistency.
     """
-    db = DatabaseService()
+    db = get_db()
 
     # Users table
     db.execute("""
@@ -65,6 +68,7 @@ def ensure_db():
         invoice_number TEXT,
         invoice_date TEXT,
         batch_number TEXT,
+        expiry_date TEXT,
         quantity INTEGER,
         amount REAL,
         cgst REAL,
@@ -88,14 +92,86 @@ def ensure_db():
         )
 
 
+def seed_initial_data():
+    """
+    Seed initial vendors, items, and stock into the database.
+    Uses the singleton database instance for consistency.
+    """
+    from datetime import datetime
+    
+    db = get_db()
+    
+    # Vendor list
+    vendors = [
+        "SEEMA CHEMICALS", "RIDDHI TRADERS", "ADI ENTERPRISE",
+        "PRASAD SURGICAL", "KRISHNA ENTERPRISE", "CURE SUPPLIERS",
+        "AN PHARMA", "GTB ENTERPRISE", "J&B MEDICAL AND SURGICAL",
+        "RBM DISRIBUTOR", "MATRIX BIOMEDICAL", "JP ENTERPRISE", "PRAKHAR ENTERPRISE"
+    ]
+    
+    # Items with initial stock quantities
+    items_with_qty = {
+        "Glucose Kit": 0, "Serum cholesterol": 0, "Serum triglyceride": 0,
+        "Blood urea": 0, "Serum creatinine": 0, "atotal bilirubin": 0,
+        "Serum SGPT": 0, "Serum Alkaline phosphate": 0, "Serum uric acid": 0,
+        "HBA1C": 0, "CRP Kit": 0, "RA": 2, "Serum widal": 1,
+        "Pregnancy test": 50, "M.T. test": 0, "Urine strick": 5,
+        "Blood group": 0, "Cell pack (diluent foe 3-part)": 0,
+        "Dengue card": 30, "Cell clean": 0, "Vaccurate k3. E.D.T.A.": 500,
+        "Vaccurate k3. Plain": 600, "Vaccurate k3. FLUORIDE": 300,
+        "Giemasa stain": 2, "Printer Roll": 4,
+        "Stromatolyser (lyse solution for 3 part)": 0, "Distilled water": 4,
+        "Micro slide": 2, "Cover slip": 4, "Filter paper": 1,
+        "PM KIT(ERBA EM DESTINY 180)": 0, "Paper tape": 0,
+        "Yellow tips": 0, "Blue tips": 0, "ESR tube": 0,
+        "Tissue paper roll": 3, "Cleaner wood oil": 2, "Turniket belt": 3,
+        "Fouchets reagent": 0, "Barium Chloride": 0, "Malaria card": 50,
+        "Urine container beaker": 30, "ROTER": 3, "XL AUTO WASH": 1,
+        "XL MULTICA ERBA NORM": 0, "Blood collection needle 22g": 4,
+        "Collection vial 1.5 ml": 0, "URBA Path": 0, "URBA XL MULITCAL": 0, "CRP": 0
+    }
+    
+    # Insert vendors
+    for vendor in vendors:
+        try:
+            db.execute("INSERT OR IGNORE INTO vendors (name) VALUES (?)", (vendor,))
+        except Exception:
+            pass
+    
+    # Insert items
+    for item_name in items_with_qty.keys():
+        try:
+            db.execute("INSERT OR IGNORE INTO items (name) VALUES (?)", (item_name,))
+        except Exception:
+            pass
+    
+    # Add initial stock for items with quantity > 0
+    today = datetime.now().strftime("%Y-%m-%d")
+    for item_name, quantity in items_with_qty.items():
+        if quantity > 0:
+            result = db.fetch_one("SELECT id FROM items WHERE name = ?", (item_name,))
+            if result:
+                item_id = result['id']
+                existing = db.fetch_one("SELECT id FROM stock_register WHERE item_id = ?", (item_id,))
+                if not existing:
+                    try:
+                        db.execute("""
+                            INSERT INTO stock_register (item_id, vendor_id, received_qty, issued_qty, balance_qty, date)
+                            VALUES (?, NULL, ?, 0, ?, ?)
+                        """, (item_id, quantity, quantity, today))
+                    except Exception:
+                        pass
+    
+    print("✅ Database initialized with vendors, items & stock.")
+
+
 def main():
     """Main entry point for the application."""
-    # Ensure database exists
+    # Ensure database and tables exist
     ensure_db()
     
-    # Seed initial data (vendors, items, initial stock)
-    from models.seed_data import seed_data
-    seed_data()
+    # Seed initial data
+    seed_initial_data()
     
     # Start the PyQt6 application
     app = QApplication(sys.argv)
