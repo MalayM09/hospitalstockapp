@@ -4,16 +4,16 @@ A desktop application for managing hospital/lab stock inventory, built with Pyth
 
 ## Features
 
-- 🔐 **Secure Login** - Password-protected access with bcrypt hashing
-- 📦 **Vendor Management** - Add, edit, delete vendors
-- 🏷️ **Item Management** - Manage inventory items
-- 🛒 **Purchase Entry** - Record purchases with automatic tax calculation
-- 📤 **Stock Issue** - Issue stock with balance tracking
-- 📋 **Stock Register** - View current stock levels with search/filter
-- 📄 **Bill Details** - View, edit, delete purchase records
-- 📊 **Reports** - Daily, weekly, monthly, and vendor-wise reports
-- 🖨️ **Print & Export** - Print reports or export to Excel
-- 🔄 **Auto-Backup** - Automatic database backup on every modification
+- **Secure Login** - Password-protected access with bcrypt hashing
+- **Vendor Management** - Add, edit, delete vendors
+- **Item Management** - Manage inventory items
+- **Purchase Entry** - Record purchases with automatic tax calculation
+- **Stock Issue** - Issue stock with balance tracking
+- **Stock Register** - View current stock levels with search/filter
+- **Bill Details** - View, edit, delete purchase records
+- **Reports** - Daily, weekly, monthly, and vendor-wise reports
+- **Print & Export** - Print reports or export to Excel
+- **Auto-Backup** - Automatic database backup on every modification
 
 ## Installation (For Development)
 
