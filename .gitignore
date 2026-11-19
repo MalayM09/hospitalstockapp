@@ -50,9 +50,10 @@ env/
 ehthumbs.db
 Thumbs.db
 
-# Database files (don't commit actual data)
-data/hospital.db
-data/backups/
+# App data: database, backups, logs, settings (never commit real data)
+data/
+*.db-wal
+*.db-shm
 
 # Logs
 *.log

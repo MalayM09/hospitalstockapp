@@ -278,44 +278,32 @@ class ReportsWindow(QWidget):
         to_str = self.to_date.date().toString("yyyy-MM-dd")
         return from_str, to_str
 
-    def show_daily_report(self):
+    # Reports use the INVOICE date (when the purchase actually happened), falling
+    # back to the entry date for any bill without one. Values are passed as SQL
+    # parameters, never pasted into the query text.
+    _BILL_DATE = "COALESCE(b.invoice_date, b.entry_date)"
+
+    def _period_report(self, title, group_expr, label):
         from_date, to_date = self.get_date_range()
         query = f"""
-        SELECT entry_date as Date, SUM(net_amount) AS Total_Spent
-        FROM bills
-        WHERE entry_date BETWEEN '{from_date}' AND '{to_date}'
-        GROUP BY entry_date
-        ORDER BY entry_date DESC
+        SELECT {group_expr} AS {label}, COUNT(b.id) AS Bills, ROUND(SUM(b.net_amount), 2) AS Total_Spent
+        FROM bills b
+        WHERE {self._BILL_DATE} BETWEEN ? AND ?
+        GROUP BY {label}
+        ORDER BY {label} DESC
         """
-        self.last_report_title = f"Daily Report ({from_date} to {to_date})"
+        self.last_report_title = f"{title} ({from_date} to {to_date})"
         self.result_title.setText(self.last_report_title)
-        self.generate_report(query)
+        self.generate_report(query, (from_date, to_date))
+
+    def show_daily_report(self):
+        self._period_report("Daily Report", self._BILL_DATE, "Date")
 
     def show_weekly_report(self):
-        from_date, to_date = self.get_date_range()
-        query = f"""
-        SELECT STRFTIME('%Y-%W', entry_date) AS Week, SUM(net_amount) AS Total_Spent
-        FROM bills
-        WHERE entry_date BETWEEN '{from_date}' AND '{to_date}'
-        GROUP BY Week
-        ORDER BY Week DESC
-        """
-        self.last_report_title = f"Weekly Report ({from_date} to {to_date})"
-        self.result_title.setText(self.last_report_title)
-        self.generate_report(query)
+        self._period_report("Weekly Report", f"STRFTIME('%Y-W%W', {self._BILL_DATE})", "Week")
 
     def show_monthly_report(self):
-        from_date, to_date = self.get_date_range()
-        query = f"""
-        SELECT STRFTIME('%Y-%m', entry_date) AS Month, SUM(net_amount) AS Total_Spent
-        FROM bills
-        WHERE entry_date BETWEEN '{from_date}' AND '{to_date}'
-        GROUP BY Month
-        ORDER BY Month DESC
-        """
-        self.last_report_title = f"Monthly Report ({from_date} to {to_date})"
-        self.result_title.setText(self.last_report_title)
-        self.generate_report(query)
+        self._period_report("Monthly Report", f"STRFTIME('%Y-%m', {self._BILL_DATE})", "Month")
 
     def show_stock_summary(self):
         self.list_widget.clear()
@@ -344,37 +332,33 @@ class ReportsWindow(QWidget):
     def show_vendor_report(self):
         from_date, to_date = self.get_date_range()
         query = f"""
-        SELECT v.name AS Vendor, COUNT(b.id) AS Bills, SUM(b.net_amount) AS Total_Spent
+        SELECT v.name AS Vendor, COUNT(b.id) AS Bills, ROUND(SUM(b.net_amount), 2) AS Total_Spent
         FROM bills b
         JOIN vendors v ON b.vendor_id = v.id
-        WHERE b.entry_date BETWEEN '{from_date}' AND '{to_date}'
+        WHERE {self._BILL_DATE} BETWEEN ? AND ?
         GROUP BY v.id
         ORDER BY Total_Spent DESC
         """
         self.last_report_title = f"Vendor Report ({from_date} to {to_date})"
         self.result_title.setText(self.last_report_title)
-        self.generate_report(query)
+        self.generate_report(query, (from_date, to_date))
 
-    def generate_report(self, query):
-        records = self.db.fetch_all(query)
+    def generate_report(self, query, params=()):
+        records = self.db.fetch_all(query, params)
         self.list_widget.clear()
 
         if not records:
+            self.last_report_df = None
             self.list_widget.addItem("No data found for selected date range")
             return
 
-        data = [dict(row) for row in records]
-        self.last_report_df = pd.DataFrame(data)
+        self.last_report_df = pd.DataFrame(records)
 
-        # Add header
-        if data:
-            headers = " | ".join([f"{k:<15}" for k in data[0].keys()])
-            self.list_widget.addItem(headers)
-            self.list_widget.addItem("-" * len(headers))
-
+        headers = " | ".join(f"{k:<15}" for k in records[0].keys())
+        self.list_widget.addItem(headers)
+        self.list_widget.addItem("-" * len(headers))
         for row in records:
-            line = " | ".join([f"{str(v):<15}" for v in row])
-            self.list_widget.addItem(line)
+            self.list_widget.addItem(" | ".join(f"{str(v):<15}" for v in row.values()))
 
     def export_to_excel(self):
         if self.last_report_df is None:

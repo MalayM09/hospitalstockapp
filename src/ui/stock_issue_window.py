@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate
 
-from services.stock_service import StockService
+from services.stock_service import StockService, StockError
 from services.item_service import ItemService
 
 
@@ -89,8 +89,11 @@ class StockIssueWindow(QWidget):
         # Issue Date
         form_layout.addWidget(self.create_label("Issue Date"))
         self.date_input = QDateEdit()
+        self.date_input.setDisplayFormat("dd-MM-yyyy")
         self.date_input.setDate(QDate.currentDate())
+        self.date_input.setMaximumDate(QDate.currentDate())  # no issuing in the future
         self.date_input.setCalendarPopup(True)
+        self.date_input.dateChanged.connect(self.update_balance_display)
         self.date_input.setStyleSheet("""
             QDateEdit {
                 background-color: #F5F7FA;
@@ -252,11 +255,16 @@ class StockIssueWindow(QWidget):
 
     def update_balance_display(self):
         item_id = self.item_dropdown.currentData()
-        if item_id:
-            balance = self.stock_service.get_stock_balance(item_id)
-            self.balance_label.setText(f"Available Balance: {balance} units")
-        else:
+        if not item_id:
             self.balance_label.setText("Available Balance: --")
+            return
+        balance = self.stock_service.get_stock_balance(item_id)
+        text = f"Available Balance: {balance} units"
+        selected = self.date_input.date()
+        if selected != QDate.currentDate():
+            on_date = self.stock_service.get_stock_balance(item_id, as_of=selected.toString("yyyy-MM-dd"))
+            text += f"\n(on {selected.toString('dd-MM-yyyy')}: {on_date} units)"
+        self.balance_label.setText(text)
 
     def issue_stock(self):
         item_id = self.item_dropdown.currentData()
@@ -271,28 +279,27 @@ class StockIssueWindow(QWidget):
             return
 
         qty = int(qty_text)
-        current_balance = self.stock_service.get_stock_balance(item_id)
+        issue_date = self.date_input.date().toString("yyyy-MM-dd")
 
+        current_balance = self.stock_service.get_stock_balance(item_id)
         if qty > current_balance:
             QMessageBox.warning(self, "Error", f"Not enough stock! Available: {current_balance}")
             return
 
-        # Get the selected issue date
-        issue_date = self.date_input.date().toString("yyyy-MM-dd")
-
-        # Issue stock without vendor (for lab use)
-        self.stock_service.issue_stock(item_id, qty, vendor_id=None, issue_date=issue_date)
+        # issue_stock also refuses a backdated issue for which stock hadn't arrived yet
+        try:
+            self.stock_service.issue_stock(item_id, qty, vendor_id=None, issue_date=issue_date)
+        except StockError as e:
+            QMessageBox.warning(self, "Cannot Issue", str(e))
+            return
         QMessageBox.information(self, "Success", "Stock issued successfully for lab use!")
         self.qty_input.clear()
-        self.date_input.setDate(QDate.currentDate())
         self.update_balance_display()
         self.load_stock_issued()
 
     def load_stock_issued(self):
         self.issue_list.clear()
-        entries = self.stock_service.get_stock_history()
-        for e in entries:
-            if e['issued_qty'] > 0:
-                self.issue_list.addItem(
-                    f"{e['date']} | {e['item_name']} | {e['issued_qty']} units issued (Lab Use)"
-                )
+        for e in self.stock_service.get_recent_issues():
+            self.issue_list.addItem(
+                f"{e['date']} | {e['item_name']} | {e['issued_qty']} units issued (Lab Use)"
+            )

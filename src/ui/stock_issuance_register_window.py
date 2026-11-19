@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox, QFrame,
-    QLineEdit, QDateEdit
+    QLineEdit, QDateEdit, QDialog, QComboBox, QGridLayout
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
@@ -9,7 +9,8 @@ from PyQt6.QtGui import QTextDocument
 import pandas as pd
 from datetime import datetime
 
-from services.stock_service import StockService
+from services.stock_service import StockService, StockError
+from services.item_service import ItemService
 
 
 class StockIssuanceRegisterWindow(QWidget):
@@ -143,9 +144,9 @@ class StockIssuanceRegisterWindow(QWidget):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
+        self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels([
-            "Sr. No.", "Date", "Item Name", "Quantity Issued"
+            "Entry ID", "Date", "Item Name", "Quantity Issued", "Remarks"
         ])
         self.table.setStyleSheet("""
             QTableWidget {
@@ -193,11 +194,15 @@ class StockIssuanceRegisterWindow(QWidget):
         btn_layout.setSpacing(15)
 
         refresh_btn = self.create_button("🔄 Refresh", "#C62828", self.load_data)
+        edit_btn = self.create_button("✏️ Edit Selected", "#1565C0", self.edit_selected)
+        delete_btn = self.create_button("🗑️ Delete Selected", "#B71C1C", self.delete_selected)
         export_btn = self.create_button("📊 Export to Excel", "#1565C0", self.export_to_excel)
         print_btn = self.create_button("🖨️ Print", "#7B1FA2", self.print_report)
         close_btn = self.create_button("← Back", "#546E7A", self.close)
 
         btn_layout.addWidget(refresh_btn)
+        btn_layout.addWidget(edit_btn)
+        btn_layout.addWidget(delete_btn)
         btn_layout.addWidget(export_btn)
         btn_layout.addWidget(print_btn)
         btn_layout.addStretch()
@@ -285,6 +290,7 @@ class StockIssuanceRegisterWindow(QWidget):
         self.load_data()
 
     def display_records(self, records):
+        self.table.clearSpans()  # a previous "No data found" row may have merged cells
         self.table.setRowCount(len(records))
 
         data_for_export = []
@@ -298,12 +304,14 @@ class StockIssuanceRegisterWindow(QWidget):
             qty_item = QTableWidgetItem(str(record['issued_qty']))
             qty_item.setForeground(Qt.GlobalColor.darkRed)
             self.table.setItem(row_idx, 3, qty_item)
+            self.table.setItem(row_idx, 4, QTableWidgetItem(record['remarks']))
 
             data_for_export.append({
                 'Sr. No.': record['sr_no'],
                 'Date': record['date'],
                 'Item Name': record['item_name'],
-                'Quantity Issued': record['issued_qty']
+                'Quantity Issued': record['issued_qty'],
+                'Remarks': record['remarks'],
             })
 
         self.last_data = data_for_export
@@ -311,7 +319,62 @@ class StockIssuanceRegisterWindow(QWidget):
         if not records:
             self.table.setRowCount(1)
             self.table.setItem(0, 0, QTableWidgetItem("No data found"))
-            self.table.setSpan(0, 0, 1, 4)
+            self.table.setSpan(0, 0, 1, self.table.columnCount())
+
+    def get_selected_id(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        item = self.table.item(row, 0)
+        return int(item.text()) if item and item.text().isdigit() else None
+
+    def edit_selected(self):
+        stock_id = self.get_selected_id()
+        if stock_id is None:
+            QMessageBox.warning(self, "Error", "Please select an issue entry to edit")
+            return
+        entry = self.stock_service.get_issue(stock_id)
+        if not entry:
+            QMessageBox.warning(self, "Error", "That entry no longer exists")
+            self.load_data()
+            return
+        dialog = EditIssueDialog(entry, self)
+        while dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+            if data is None:
+                continue
+            try:
+                self.stock_service.update_issue(stock_id, **data)
+            except StockError as e:
+                QMessageBox.warning(self, "Cannot Save", str(e))
+                continue
+            QMessageBox.information(self, "Success", "Issue entry updated.")
+            self.load_data()
+            break
+
+    def delete_selected(self):
+        stock_id = self.get_selected_id()
+        if stock_id is None:
+            QMessageBox.warning(self, "Error", "Please select an issue entry to delete")
+            return
+        entry = self.stock_service.get_issue(stock_id)
+        if not entry:
+            self.load_data()
+            return
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Delete this issue entry?\n\n{entry['date']}  ·  {entry['item_name']}  ·  "
+            f"{entry['issued_qty']} units\n\nThe quantity will be added back to stock.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.stock_service.delete_issue(stock_id)
+            except StockError as e:
+                QMessageBox.warning(self, "Cannot Delete", str(e))
+                return
+            self.load_data()
 
     def export_to_excel(self):
         if not self.last_data:
@@ -381,3 +444,81 @@ class StockIssuanceRegisterWindow(QWidget):
             doc.setHtml(html)
             doc.print_(printer)
             QMessageBox.information(self, "Success", "Print job sent!")
+
+
+class EditIssueDialog(QDialog):
+    """Correct the item, quantity, date or remarks of an issue entry."""
+
+    def __init__(self, entry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.setWindowTitle(f"Edit Issue Entry #{entry['id']}")
+        self.setMinimumWidth(460)
+        self.setStyleSheet("background-color: white;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(15)
+        title = QLabel(f"Edit Issue Entry #{entry['id']}")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #C62828;")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        self.item_combo = QComboBox()
+        for i in ItemService().get_all_items():
+            self.item_combo.addItem(i['name'], i['id'])
+        self.item_combo.setCurrentIndex(max(0, self.item_combo.findData(entry['item_id'])))
+
+        self.qty_input = QLineEdit(str(entry['issued_qty']))
+
+        self.date_input = QDateEdit()
+        self.date_input.setDisplayFormat("dd-MM-yyyy")
+        self.date_input.setCalendarPopup(True)
+        self.date_input.setMaximumDate(QDate.currentDate())
+        self.date_input.setDate(QDate.fromString(entry['date'], "yyyy-MM-dd") if entry['date']
+                                else QDate.currentDate())
+
+        self.remarks_input = QLineEdit(entry.get('remarks') or '')
+
+        for row, (label, widget) in enumerate([
+            ("Item", self.item_combo), ("Quantity", self.qty_input),
+            ("Issue Date", self.date_input), ("Remarks", self.remarks_input),
+        ]):
+            lbl = QLabel(label)
+            lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #333;")
+            grid.addWidget(lbl, row, 0)
+            grid.addWidget(widget, row, 1)
+        layout.addLayout(grid)
+
+        buttons = QHBoxLayout()
+        save = QPushButton("💾 Save")
+        save.setStyleSheet("""
+            QPushButton { background-color: #C62828; color: white; border: none; border-radius: 8px;
+                          padding: 12px 30px; font-weight: bold; }
+            QPushButton:hover { background-color: #B71C1C; }
+        """)
+        save.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.setStyleSheet("""
+            QPushButton { background-color: #9E9E9E; color: white; border: none; border-radius: 8px;
+                          padding: 12px 30px; }
+            QPushButton:hover { background-color: #757575; }
+        """)
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(save)
+        buttons.addWidget(cancel)
+        layout.addLayout(buttons)
+
+    def get_data(self):
+        qty = self.qty_input.text().strip()
+        if not qty.isdigit() or int(qty) <= 0:
+            QMessageBox.warning(self, "Error", "Quantity must be a whole number greater than zero.")
+            return None
+        return {
+            'item_id': self.item_combo.currentData(),
+            'qty': int(qty),
+            'issue_date': self.date_input.date().toString("yyyy-MM-dd"),
+            'remarks': self.remarks_input.text().strip(),
+        }

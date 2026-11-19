@@ -40,6 +40,9 @@ a = Analysis(
         'services.item_service',
         'services.vendor_service',
         'services.backup_service',
+        'services.backup_scheduler',
+        'services.export_service',
+        'services.gst',
         # UI modules
         'ui',
         'ui.theme',
@@ -54,13 +57,17 @@ a = Analysis(
         'ui.bill_details_view_window',
         'ui.reports_window',
         'ui.stock_issuance_register_window',
+        'ui.backup_window',
         # Model modules
         'models',
         'models.init_db',
         'models.seed_data',
+        'models.migrations',
         # Utils modules
         'utils',
         'utils.db_path',
+        'utils.settings',
+        'utils.error_handling',
     ],
     hookspath=[],
     hooksconfig={},

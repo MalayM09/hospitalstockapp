@@ -10,6 +10,8 @@ import pandas as pd
 from datetime import datetime
 
 from services.bill_service import BillService
+from services.gst import GST_RATES, compute_totals
+from services.stock_service import StockError
 from services.vendor_service import VendorService
 from services.item_service import ItemService
 
@@ -54,10 +56,10 @@ class BillDetailsViewWindow(QWidget):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(12)
+        self.table.setColumnCount(13)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Date", "Vendor", "Item Name", "Invoice No.", "Batch No.",
-            "Expiry Date", "Qty.", "Amount", "Tax", "Round Off", "Net Amount"
+            "ID", "Invoice Date", "Vendor", "Item Name", "Invoice No.", "Batch No.",
+            "Expiry Date", "Qty.", "Amount", "GST %", "Tax", "Round Off", "Net Amount"
         ])
         self.table.setStyleSheet("""
             QTableWidget {
@@ -178,30 +180,33 @@ class BillDetailsViewWindow(QWidget):
 
     def load_data(self):
         records = self.bill_service.get_bill_details_view()
+        self.table.clearSpans()  # a previous "No data found" row may have merged cells
         self.table.setRowCount(len(records))
 
         data_for_export = []
-
         for row_idx, record in enumerate(records):
-            self.table.setItem(row_idx, 0, QTableWidgetItem(str(record['sr_no'])))
-            self.table.setItem(row_idx, 1, QTableWidgetItem(str(record['date'] or '-')))
-            self.table.setItem(row_idx, 2, QTableWidgetItem(record['vendor']))
-            self.table.setItem(row_idx, 3, QTableWidgetItem(str(record['item_name'] or '-')))
-            self.table.setItem(row_idx, 4, QTableWidgetItem(str(record['invoice_no'] or '-')))
-            self.table.setItem(row_idx, 5, QTableWidgetItem(str(record['batch_no'] or '-')))
-            self.table.setItem(row_idx, 6, QTableWidgetItem(str(record['expiry_date'] or '-')))
-            self.table.setItem(row_idx, 7, QTableWidgetItem(str(record['qty'] or 0)))
-            self.table.setItem(row_idx, 8, QTableWidgetItem(f"₹{record['amount'] or 0}"))
-            self.table.setItem(row_idx, 9, QTableWidgetItem(f"₹{record['tax'] or 0}"))
-            self.table.setItem(row_idx, 10, QTableWidgetItem(f"₹{record['round_off'] or 0}"))
-
-            net_item = QTableWidgetItem(f"₹{record['net_amount'] or 0}")
-            net_item.setForeground(Qt.GlobalColor.darkGreen)
-            self.table.setItem(row_idx, 11, net_item)
+            values = [
+                str(record['sr_no']),
+                str(record['date'] or '-'),
+                record['vendor'],
+                str(record['item_name'] or '-'),
+                str(record['invoice_no'] or '-'),
+                str(record['batch_no'] or '-'),
+                str(record['expiry_date'] or '-'),
+                str(record['qty'] or 0),
+                f"₹{record['amount'] or 0:.2f}",
+                f"{record['gst_rate']:g}%",
+                f"₹{record['tax'] or 0:.2f}",
+                f"₹{record['round_off'] or 0:.2f}",
+                f"₹{record['net_amount'] or 0:.2f}",
+            ]
+            for col, value in enumerate(values):
+                self.table.setItem(row_idx, col, QTableWidgetItem(value))
+            self.table.item(row_idx, 12).setForeground(Qt.GlobalColor.darkGreen)
 
             data_for_export.append({
                 'ID': record['sr_no'],
-                'Date': record['date'],
+                'Invoice Date': record['date'],
                 'Vendor': record['vendor'],
                 'Item Name': record['item_name'],
                 'Invoice No.': record['invoice_no'],
@@ -209,6 +214,7 @@ class BillDetailsViewWindow(QWidget):
                 'Expiry Date': record['expiry_date'],
                 'Qty.': record['qty'],
                 'Amount': record['amount'],
+                'GST %': record['gst_rate'],
                 'Tax': record['tax'],
                 'Round Off': record['round_off'],
                 'Net Amount': record['net_amount']
@@ -219,7 +225,7 @@ class BillDetailsViewWindow(QWidget):
         if not records:
             self.table.setRowCount(1)
             self.table.setItem(0, 0, QTableWidgetItem("No data found"))
-            self.table.setSpan(0, 0, 1, 12)
+            self.table.setSpan(0, 0, 1, self.table.columnCount())
 
     def get_selected_bill_id(self):
         """Get the ID of the selected bill."""
@@ -227,7 +233,7 @@ class BillDetailsViewWindow(QWidget):
         if selected < 0:
             return None
         id_item = self.table.item(selected, 0)
-        if id_item:
+        if id_item and id_item.text().isdigit():
             return int(id_item.text())
         return None
 
@@ -244,26 +250,19 @@ class BillDetailsViewWindow(QWidget):
             QMessageBox.warning(self, "Error", "Bill not found")
             return
 
-        # Create edit dialog
         dialog = EditBillDialog(bill, self.vendor_service, self.item_service, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        while dialog.exec() == QDialog.DialogCode.Accepted:
             data = dialog.get_data()
-            self.bill_service.update_bill(
-                bill_id=bill_id,
-                item_id=data['item_id'],
-                vendor_id=data['vendor_id'],
-                invoice_number=data['invoice_number'],
-                invoice_date=data['invoice_date'],
-                batch_number=data['batch_number'],
-                expiry_date=data['expiry_date'],
-                quantity=data['quantity'],
-                amount=data['amount'],
-                cgst=data['cgst'],
-                sgst=data['sgst'],
-                round_off=data['round_off']
-            )
+            if data is None:
+                continue  # validation message already shown; keep the dialog open
+            try:
+                self.bill_service.update_bill(bill_id=bill_id, **data)
+            except StockError as e:
+                QMessageBox.warning(self, "Cannot Save", str(e))
+                continue
             QMessageBox.information(self, "Success", "Bill updated successfully!")
             self.load_data()
+            break
 
     def delete_selected(self):
         """Delete selected bill with confirmation."""
@@ -274,13 +273,18 @@ class BillDetailsViewWindow(QWidget):
 
         reply = QMessageBox.question(
             self, "Confirm Delete",
-            f"Are you sure you want to delete Bill #{bill_id}?\n\nThis action cannot be undone.",
+            f"Are you sure you want to delete Bill #{bill_id}?\n\n"
+            "The stock it added will be removed too.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self.bill_service.delete_bill(bill_id)
+            try:
+                self.bill_service.delete_bill(bill_id)
+            except StockError as e:
+                QMessageBox.warning(self, "Cannot Delete", str(e))
+                return
             QMessageBox.information(self, "Success", "Bill deleted successfully!")
             self.load_data()
 
@@ -335,7 +339,7 @@ class BillDetailsViewWindow(QWidget):
                 html += f"""
                     <tr>
                         <td>{item['ID']}</td>
-                        <td>{item['Date']}</td>
+                        <td>{item['Invoice Date']}</td>
                         <td>{item['Vendor']}</td>
                         <td>{item['Invoice No.']}</td>
                         <td>{item['Qty.']}</td>
@@ -354,111 +358,130 @@ class BillDetailsViewWindow(QWidget):
 
 
 class EditBillDialog(QDialog):
-    """Dialog for editing a bill."""
+    """
+    Edit every field of a bill. Taxes and the net amount are recalculated live
+    from quantity x rate and the GST rate, exactly as in Purchase Entry.
+    """
 
     def __init__(self, bill, vendor_service, item_service, parent=None):
         super().__init__(parent)
         self.bill = bill
         self.vendor_service = vendor_service
         self.item_service = item_service
-        self.setWindowTitle("Edit Bill")
-        self.setFixedSize(500, 500)
+        self.setWindowTitle(f"Edit Bill #{bill['id']}")
+        self.setMinimumWidth(560)
         self.setStyleSheet("background-color: white;")
         self.init_ui()
+        self.recalculate()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         layout.setContentsMargins(30, 30, 30, 30)
 
-        title = QLabel("Edit Bill Details")
+        title = QLabel(f"Edit Bill #{self.bill['id']}")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #E65100;")
         layout.addWidget(title)
 
-        # Grid for form
         grid = QGridLayout()
         grid.setSpacing(10)
+        row = 0
 
-        # Vendor
-        grid.addWidget(self.create_label("Vendor"), 0, 0)
+        def add_row(label, widget):
+            nonlocal row
+            grid.addWidget(self.create_label(label), row, 0)
+            grid.addWidget(widget, row, 1)
+            row += 1
+
+        self.item_combo = QComboBox()
+        for i in self.item_service.get_all_items():
+            self.item_combo.addItem(i['name'], i['id'])
+        self.item_combo.setCurrentIndex(max(0, self.item_combo.findData(self.bill['item_id'])))
+        add_row("Item", self.item_combo)
+
         self.vendor_combo = QComboBox()
         for v in self.vendor_service.get_all_vendors():
-            vendor_id = v[0] if isinstance(v, (tuple, list)) else v['id']
-            vendor_name = v[1] if isinstance(v, (tuple, list)) else v['name']
-            self.vendor_combo.addItem(vendor_name, vendor_id)
-        self.vendor_combo.setCurrentIndex(self.vendor_combo.findData(self.bill['vendor_id']))
-        grid.addWidget(self.vendor_combo, 0, 1)
+            self.vendor_combo.addItem(v['name'], v['id'])
+        self.vendor_combo.setCurrentIndex(max(0, self.vendor_combo.findData(self.bill['vendor_id'])))
+        add_row("Vendor", self.vendor_combo)
 
-        # Invoice Number
-        grid.addWidget(self.create_label("Invoice No."), 1, 0)
         self.invoice_input = QLineEdit(self.bill['invoice_number'] or '')
-        grid.addWidget(self.invoice_input, 1, 1)
+        add_row("Invoice No.", self.invoice_input)
 
-        # Invoice Date
-        grid.addWidget(self.create_label("Invoice Date"), 2, 0)
         self.date_input = QDateEdit()
-        if self.bill['invoice_date']:
-            self.date_input.setDate(QDate.fromString(self.bill['invoice_date'], "yyyy-MM-dd"))
+        self.date_input.setDisplayFormat("dd-MM-yyyy")
         self.date_input.setCalendarPopup(True)
-        grid.addWidget(self.date_input, 2, 1)
+        self.date_input.setMaximumDate(QDate.currentDate())
+        inv_date = self.bill['invoice_date'] or self.bill['entry_date']
+        self.date_input.setDate(QDate.fromString(inv_date, "yyyy-MM-dd") if inv_date else QDate.currentDate())
+        add_row("Invoice Date", self.date_input)
 
-        # Batch Number
-        grid.addWidget(self.create_label("Batch No."), 3, 0)
         self.batch_input = QLineEdit(self.bill['batch_number'] or '')
-        grid.addWidget(self.batch_input, 3, 1)
+        add_row("Batch No.", self.batch_input)
 
-        # Expiry Date
-        grid.addWidget(self.create_label("Expiry Date"), 4, 0)
         self.expiry_input = QDateEdit()
+        self.expiry_input.setDisplayFormat("dd-MM-yyyy")
+        self.expiry_input.setCalendarPopup(True)
         if self.bill.get('expiry_date'):
             self.expiry_input.setDate(QDate.fromString(self.bill['expiry_date'], "yyyy-MM-dd"))
         else:
             self.expiry_input.setDate(QDate.currentDate().addYears(1))
-        self.expiry_input.setCalendarPopup(True)
-        grid.addWidget(self.expiry_input, 4, 1)
+        add_row("Expiry Date", self.expiry_input)
 
-        # Quantity
-        grid.addWidget(self.create_label("Quantity"), 5, 0)
-        self.qty_input = QLineEdit(str(self.bill['quantity'] or 0))
-        grid.addWidget(self.qty_input, 5, 1)
+        qty = self.bill['quantity'] or 0
+        self.qty_input = QLineEdit(str(qty))
+        self.qty_input.textChanged.connect(self.recalculate)
+        add_row("Quantity", self.qty_input)
 
-        # Amount
-        grid.addWidget(self.create_label("Amount"), 6, 0)
-        self.amount_input = QLineEdit(str(self.bill['amount'] or 0))
-        grid.addWidget(self.amount_input, 6, 1)
+        rate = (self.bill['amount'] or 0) / qty if qty else (self.bill['amount'] or 0)
+        self.rate_input = QLineEdit(f"{rate:.2f}")
+        self.rate_input.textChanged.connect(self.recalculate)
+        add_row("Rate per Unit, before GST (₹)", self.rate_input)
+
+        self.gst_combo = QComboBox()
+        for r in GST_RATES:
+            self.gst_combo.addItem(f"{r}%", r)
+        current_rate = self.bill.get('gst_rate') or 0
+        idx = self.gst_combo.findData(current_rate)
+        if idx < 0:
+            # Bill saved with a non-standard rate (e.g. by the old CGST/SGST dropdowns)
+            self.gst_combo.addItem(f"{current_rate:g}% (as saved)", current_rate)
+            idx = self.gst_combo.count() - 1
+        self.gst_combo.setCurrentIndex(idx)
+        self.gst_combo.currentIndexChanged.connect(self.recalculate)
+        add_row("GST Rate (total)", self.gst_combo)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("Same state (CGST + SGST)", False)
+        self.type_combo.addItem("Other state (IGST)", True)
+        self.type_combo.setCurrentIndex(1 if (self.bill.get('igst') or 0) > 0 else 0)
+        self.type_combo.currentIndexChanged.connect(self.recalculate)
+        add_row("Tax Type", self.type_combo)
 
         layout.addLayout(grid)
 
-        # Buttons
+        self.totals_label = QLabel()
+        self.totals_label.setStyleSheet("""
+            background-color: #E8F5E9; border: 2px solid #4CAF50; border-radius: 10px;
+            padding: 12px; font-size: 14px; color: #1B5E20;
+        """)
+        layout.addWidget(self.totals_label)
+
         btn_layout = QHBoxLayout()
-        
         save_btn = QPushButton("💾 Save")
         save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #E65100;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 12px 30px;
-                font-weight: bold;
-            }
+            QPushButton { background-color: #E65100; color: white; border: none; border-radius: 8px;
+                          padding: 12px 30px; font-weight: bold; }
             QPushButton:hover { background-color: #BF360C; }
         """)
         save_btn.clicked.connect(self.accept)
-        
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9E9E9E;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 12px 30px;
-            }
+            QPushButton { background-color: #9E9E9E; color: white; border: none; border-radius: 8px;
+                          padding: 12px 30px; }
             QPushButton:hover { background-color: #757575; }
         """)
         cancel_btn.clicked.connect(self.reject)
-
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
@@ -468,23 +491,46 @@ class EditBillDialog(QDialog):
         label.setStyleSheet("font-size: 13px; font-weight: 600; color: #333;")
         return label
 
+    def recalculate(self):
+        try:
+            t = compute_totals(self.qty_input.text().strip() or 0, self.rate_input.text().strip() or 0,
+                               self.gst_combo.currentData() or 0, bool(self.type_combo.currentData()))
+        except ValueError:
+            self.totals_label.setText("Enter a valid quantity and rate to see the totals.")
+            return
+        tax = (f"IGST ₹{t['igst']:.2f}" if self.type_combo.currentData()
+               else f"CGST ₹{t['cgst']:.2f} + SGST ₹{t['sgst']:.2f}")
+        self.totals_label.setText(
+            f"Amount ₹{t['amount']:.2f}   +   {tax}   +   Round off ₹{t['round_off']:.2f}\n"
+            f"Net Amount:  ₹{t['net_amount']:.2f}"
+        )
+
     def get_data(self):
-        qty = int(self.qty_input.text() or 0)
-        amount = float(self.amount_input.text() or 0)
-        # Recalculate net amount (simplified - assumes same tax rate)
-        net_amount = amount  # You may want to add tax recalculation here
-        
+        """Validated values for BillService.update_bill, or None (after showing why)."""
+        qty_text = self.qty_input.text().strip()
+        if not qty_text.isdigit() or int(qty_text) <= 0:
+            QMessageBox.warning(self, "Error", "Quantity must be a whole number greater than zero.")
+            return None
+        try:
+            rate = float(self.rate_input.text().strip() or 0)
+        except ValueError:
+            QMessageBox.warning(self, "Error", "Rate must be a number (e.g. 125.50).")
+            return None
+        if rate < 0:
+            QMessageBox.warning(self, "Error", "Rate cannot be negative.")
+            return None
+        if not self.invoice_input.text().strip():
+            QMessageBox.warning(self, "Error", "Please enter an invoice number.")
+            return None
         return {
-            'item_id': self.bill['item_id'],
+            'item_id': self.item_combo.currentData(),
             'vendor_id': self.vendor_combo.currentData(),
-            'invoice_number': self.invoice_input.text(),
+            'invoice_number': self.invoice_input.text().strip(),
             'invoice_date': self.date_input.date().toString("yyyy-MM-dd"),
-            'batch_number': self.batch_input.text(),
+            'batch_number': self.batch_input.text().strip(),
             'expiry_date': self.expiry_input.date().toString("yyyy-MM-dd"),
-            'quantity': qty,
-            'amount': amount,
-            'cgst': self.bill['cgst'] or 0,
-            'sgst': self.bill['sgst'] or 0,
-            'round_off': self.bill['round_off'] or 0,
-            'net_amount': self.bill['net_amount'] or amount
+            'quantity': int(qty_text),
+            'rate': rate,
+            'gst_rate': self.gst_combo.currentData() or 0,
+            'interstate': bool(self.type_combo.currentData()),
         }

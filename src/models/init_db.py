@@ -1,90 +1,27 @@
-import sqlite3
-from pathlib import Path
+"""
+Command-line helper: create or upgrade the database without starting the GUI.
+
+    python src/models/init_db.py
+
+The schema itself lives in models/migrations.py (single source of truth).
+"""
+import os
 import sys
 
-# Import centralized database path utility
-from utils.db_path import get_database_path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-DB_PATH = get_database_path()
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("PRAGMA foreign_keys = ON;")
+    from services.db_service import get_db
+    from models.migrations import migrate
+    from models.seed_data import ensure_admin_user, seed_if_first_run
 
-    # users
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL
-    );
-    """)
+    db = get_db()
+    old, new = migrate(db.conn)
+    ensure_admin_user(db)
+    seed_if_first_run(db)
+    print(f"Database at {db.db_path} is at schema v{new} (was v{old})")
 
-    # vendors
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS vendors (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL
-    );
-    """)
-
-    # items
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL
-    );
-    """)
-
-    # stock register
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS stock_register (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id INTEGER NOT NULL,
-        vendor_id INTEGER,
-        received_qty INTEGER DEFAULT 0,
-        issued_qty INTEGER DEFAULT 0,
-        balance_qty INTEGER DEFAULT 0,
-        date TEXT,
-        FOREIGN KEY (item_id) REFERENCES items(id),
-        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
-    );
-    """)
-
-    # bills
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS bills (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id INTEGER,
-        vendor_id INTEGER NOT NULL,
-        invoice_number TEXT,
-        invoice_date TEXT,
-        batch_number TEXT,
-        quantity INTEGER,
-        amount REAL,
-        cgst REAL,
-        sgst REAL,
-        round_off REAL,
-        net_amount REAL,
-        entry_date TEXT,
-        FOREIGN KEY (item_id) REFERENCES items(id),
-        FOREIGN KEY (vendor_id) REFERENCES vendors(id)
-    );
-    """)
-
-    # Insert default admin user with hashed password
-    import bcrypt
-    hashed_password = bcrypt.hashpw('admin'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    cur.execute(
-        "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, ?)",
-        (1, 'admin', hashed_password)
-    )
-
-    conn.commit()
-    conn.close()
-    print(f"Database created at: {DB_PATH}")
 
 if __name__ == "__main__":
     init_db()

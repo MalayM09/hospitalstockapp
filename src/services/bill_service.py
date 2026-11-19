@@ -1,7 +1,20 @@
+"""
+Purchase bills.
+
+Each bill creates one linked PURCHASE row in the stock register, dated on the
+invoice date. Adding, editing and deleting a bill always happens in a single
+transaction together with its stock row, and is refused if it would make stock
+negative (e.g. deleting a purchase whose stock has already been issued).
+"""
+from datetime import date as _date, datetime
+
 from services.db_service import get_db
-from services.stock_service import StockService
-from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from services.gst import compute_totals
+from services.stock_service import StockService, StockError
+
+
+def _now():
+    return datetime.now().isoformat(timespec="seconds")
 
 
 class BillService:
@@ -9,48 +22,50 @@ class BillService:
         self.db = get_db()
         self.stock_service = StockService()
 
-    def add_bill(self, item_id, vendor_id, invoice_number, invoice_date,
-                 batch_number, expiry_date, quantity, amount, cgst, sgst, round_off=0.0):
+    def add_bill(self, item_id, vendor_id, invoice_number, invoice_date, batch_number,
+                 expiry_date, quantity, rate, gst_rate, interstate=False):
         """
-        Add a new bill with automatic net_amount calculation.
-        Also automatically updates stock (receives the quantity into inventory).
+        Save a purchase and receive its stock on the invoice date.
+        Taxes and net amount are calculated here from quantity x rate and GST %.
+        Returns the new bill id.
         """
-        # Calculate net_amount using Decimal for precision
-        net_amount = Decimal(str(amount)) + Decimal(str(cgst)) + Decimal(str(sgst)) + Decimal(str(round_off))
-        net_amount = float(net_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        if not item_id or not vendor_id:
+            raise StockError("Please select both an item and a vendor.")
+        if quantity <= 0:
+            raise StockError("Quantity must be more than zero.")
+        t = compute_totals(quantity, rate, gst_rate, interstate)
+        now = _now()
 
-        entry_date = datetime.now().strftime("%Y-%m-%d")
-
-        # 1. Insert the bill record
-        query = """
-        INSERT INTO bills (
-            item_id, vendor_id, invoice_number, invoice_date, batch_number,
-            expiry_date, quantity, amount, cgst, sgst, round_off, net_amount, entry_date
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        self.db.execute(query, (
-            item_id, vendor_id, invoice_number, invoice_date, batch_number,
-            expiry_date, quantity, amount, cgst, sgst, round_off, net_amount, entry_date
-        ))
-
-        # 2. Automatically update stock (receive the purchased quantity)
-        if item_id and quantity and quantity > 0:
-            self.stock_service.receive_stock(item_id, vendor_id, quantity)
+        with self.db.transaction():
+            bill_id = self.db.execute("""
+                INSERT INTO bills (
+                    item_id, vendor_id, invoice_number, invoice_date, batch_number,
+                    expiry_date, quantity, amount, cgst, sgst, igst, gst_rate,
+                    round_off, net_amount, entry_date, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                item_id, vendor_id, invoice_number, invoice_date, batch_number,
+                expiry_date, quantity, t["amount"], t["cgst"], t["sgst"], t["igst"], gst_rate,
+                t["round_off"], t["net_amount"], _date.today().isoformat(), now, now,
+            ))
+            self.stock_service.receive_stock(
+                item_id, vendor_id, quantity, date=invoice_date, bill_id=bill_id,
+                txn_type="PURCHASE", remarks=f"Invoice {invoice_number}",
+            )
+        return bill_id
 
     def get_recent_bills(self, limit=20):
-        """Get recent bills with vendor name."""
         return self.db.fetch_all("""
-            SELECT b.id, b.entry_date, v.name AS vendor,
-                   b.invoice_number, b.net_amount
+            SELECT b.id, b.entry_date, b.invoice_date, v.name AS vendor, i.name AS item_name,
+                   b.invoice_number, b.quantity, b.net_amount
             FROM bills b
             JOIN vendors v ON b.vendor_id = v.id
+            LEFT JOIN items i ON b.item_id = i.id
             ORDER BY b.id DESC
             LIMIT ?
         """, (limit,))
 
     def get_bill_by_id(self, bill_id):
-        """Get a specific bill by ID."""
         return self.db.fetch_one("""
             SELECT b.*, v.name AS vendor_name, i.name AS item_name
             FROM bills b
@@ -59,95 +74,80 @@ class BillService:
             WHERE b.id = ?
         """, (bill_id,))
 
+    def _remove_bill_stock(self, bill):
+        """Take back the stock a bill added (inside a transaction)."""
+        linked = self.db.scalar("SELECT COUNT(*) FROM stock_register WHERE bill_id = ?", (bill["id"],))
+        if linked:
+            self.db.execute("DELETE FROM stock_register WHERE bill_id = ?", (bill["id"],))
+        elif bill["item_id"] and (bill["quantity"] or 0) > 0:
+            # Bill saved by an older version without a link to its stock row:
+            # offset it on the date the old version recorded the receipt.
+            self.stock_service.receive_stock(
+                bill["item_id"], bill["vendor_id"], -bill["quantity"],
+                date=bill["entry_date"] or bill["invoice_date"],
+                txn_type="ADJUSTMENT",
+                remarks=f"Reversal of bill #{bill['id']} (invoice {bill['invoice_number']})",
+            )
+
     def update_bill(self, bill_id, item_id, vendor_id, invoice_number, invoice_date,
-                    batch_number, expiry_date, quantity, amount, cgst, sgst, round_off=0.0):
-        """
-        Update an existing bill with stock adjustment.
-        Reverses old stock and applies new stock to maintain data integrity.
-        """
-        # Get original bill data to calculate stock difference
-        original_bill = self.get_bill_by_id(bill_id)
-        
-        net_amount = Decimal(str(amount)) + Decimal(str(cgst)) + Decimal(str(sgst)) + Decimal(str(round_off))
-        net_amount = float(net_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                    batch_number, expiry_date, quantity, rate, gst_rate, interstate=False):
+        """Edit a bill; its stock row and taxes are recalculated to match."""
+        old = self.get_bill_by_id(bill_id)
+        if not old:
+            raise StockError("That bill no longer exists.")
+        if not item_id or not vendor_id:
+            raise StockError("Please select both an item and a vendor.")
+        if quantity <= 0:
+            raise StockError("Quantity must be more than zero.")
+        t = compute_totals(quantity, rate, gst_rate, interstate)
 
-        query = """
-        UPDATE bills SET
-            item_id = ?, vendor_id = ?, invoice_number = ?, invoice_date = ?,
-            batch_number = ?, expiry_date = ?, quantity = ?, amount = ?, cgst = ?, sgst = ?,
-            round_off = ?, net_amount = ?
-        WHERE id = ?
-        """
-        self.db.execute(query, (
-            item_id, vendor_id, invoice_number, invoice_date, batch_number,
-            expiry_date, quantity, amount, cgst, sgst, round_off, net_amount, bill_id
-        ))
-
-        # Adjust stock if item_id or quantity changed
-        if original_bill:
-            old_item_id = original_bill['item_id']
-            old_qty = original_bill['quantity'] or 0
-            old_vendor_id = original_bill['vendor_id']
-            new_qty = quantity or 0
-
-            # If item changed, reverse old item stock and add to new item
-            if old_item_id != item_id:
-                # Reverse stock for old item
-                if old_item_id and old_qty > 0:
-                    self.stock_service.reverse_received_stock(old_item_id, old_vendor_id, old_qty)
-                # Add stock for new item
-                if item_id and new_qty > 0:
-                    self.stock_service.receive_stock(item_id, vendor_id, new_qty)
-            else:
-                # Same item, just adjust the quantity difference
-                qty_diff = new_qty - old_qty
-                if qty_diff != 0 and item_id:
-                    if qty_diff > 0:
-                        # Additional stock received
-                        self.stock_service.receive_stock(item_id, vendor_id, qty_diff)
-                    else:
-                        # Stock needs to be reduced
-                        self.stock_service.reverse_received_stock(item_id, vendor_id, abs(qty_diff))
+        with self.db.transaction(), \
+                self.stock_service.guard_negative_stock([old["item_id"], item_id]):
+            self._remove_bill_stock(old)
+            self.db.execute("""
+                UPDATE bills SET
+                    item_id = ?, vendor_id = ?, invoice_number = ?, invoice_date = ?,
+                    batch_number = ?, expiry_date = ?, quantity = ?, amount = ?,
+                    cgst = ?, sgst = ?, igst = ?, gst_rate = ?, round_off = ?,
+                    net_amount = ?, updated_at = ?
+                WHERE id = ?
+            """, (
+                item_id, vendor_id, invoice_number, invoice_date, batch_number,
+                expiry_date, quantity, t["amount"], t["cgst"], t["sgst"], t["igst"],
+                gst_rate, t["round_off"], t["net_amount"], _now(), bill_id,
+            ))
+            self.stock_service.receive_stock(
+                item_id, vendor_id, quantity, date=invoice_date, bill_id=bill_id,
+                txn_type="PURCHASE", remarks=f"Invoice {invoice_number}",
+            )
 
     def delete_bill(self, bill_id):
-        """
-        Delete a bill by ID and reverse the stock that was added.
-        This maintains data integrity by removing the stock that was received
-        when the bill was originally created.
-        """
-        # Get bill data before deletion to reverse stock
+        """Delete a bill and the stock it added (refused if that stock was already issued)."""
         bill = self.get_bill_by_id(bill_id)
-        
-        if bill:
-            item_id = bill['item_id']
-            quantity = bill['quantity'] or 0
-            vendor_id = bill['vendor_id']
-            
-            # Reverse the stock that was added when bill was created
-            if item_id and quantity > 0:
-                self.stock_service.reverse_received_stock(item_id, vendor_id, quantity)
-        
-        # Now delete the bill
-        self.db.execute("DELETE FROM bills WHERE id = ?", (bill_id,))
+        if not bill:
+            return
+        with self.db.transaction(), self.stock_service.guard_negative_stock([bill["item_id"]]):
+            self._remove_bill_stock(bill)
+            self.db.execute("DELETE FROM bills WHERE id = ?", (bill_id,))
 
     def get_bill_details_view(self):
-        """Get all bills for table display with vendor names and item names."""
         return self.db.fetch_all("""
-            SELECT 
-                b.id as sr_no,
-                b.entry_date as date,
-                v.name as vendor,
-                i.name as item_name,
-                b.invoice_number as invoice_no,
-                b.batch_number as batch_no,
+            SELECT
+                b.id AS sr_no,
+                COALESCE(b.invoice_date, b.entry_date) AS date,
+                v.name AS vendor,
+                i.name AS item_name,
+                b.invoice_number AS invoice_no,
+                b.batch_number AS batch_no,
                 b.expiry_date,
-                b.quantity as qty,
+                b.quantity AS qty,
                 b.amount,
-                (COALESCE(b.cgst, 0) + COALESCE(b.sgst, 0)) as tax,
-                COALESCE(b.round_off, 0) as round_off,
+                COALESCE(b.gst_rate, 0) AS gst_rate,
+                (COALESCE(b.cgst, 0) + COALESCE(b.sgst, 0) + COALESCE(b.igst, 0)) AS tax,
+                COALESCE(b.round_off, 0) AS round_off,
                 b.net_amount
             FROM bills b
             JOIN vendors v ON b.vendor_id = v.id
             LEFT JOIN items i ON b.item_id = i.id
-            ORDER BY b.id ASC
+            ORDER BY COALESCE(b.invoice_date, b.entry_date) DESC, b.id DESC
         """)

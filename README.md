@@ -13,7 +13,25 @@ A desktop application for managing hospital/lab stock inventory, built with Pyth
 - **Bill Details** - View, edit, delete purchase records
 - **Reports** - Daily, weekly, monthly, and vendor-wise reports
 - **Print & Export** - Print reports or export to Excel
-- **Auto-Backup** - Automatic database backup on every modification
+- **Backup & Restore** - Verified backups to this PC, extra folders (second drive,
+  Google Drive / OneDrive folder) and any plugged-in USB pendrive; after changes, daily,
+  and on close. Tiered retention (last 20, daily 60 days, weekly 26 weeks, monthly forever).
+  One-click restore, plus automatic restore offer on a new/damaged installation.
+- **Excel copies** - Daily full-data Excel export and a monthly stock statement saved
+  with every backup destination
+- **Error log** - Unexpected errors are shown and written to `logs/app.log`
+
+## Data & Backups
+
+All data lives in one folder (`data/` in development; `%LOCALAPPDATA%\HospitalStockApp`
+on Windows when packaged): `hospital.db`, `backups/`, `logs/`, `settings.json`.
+
+**Important:** backups in `backups/` are on the same disk as the database. Open
+**Backup & Restore** and add at least one off-site location (pendrive or Google Drive
+folder). The dashboard shows a red warning until you do.
+
+Schema changes are applied automatically by `src/models/migrations.py`
+(a backup is taken first).
 
 ## Installation (For Development)
 
@@ -25,8 +43,8 @@ A desktop application for managing hospital/lab stock inventory, built with Pyth
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/MalayM09/hospital_stock_app.git
-cd hospital_stock_app
+git clone https://github.com/MalayM09/hospitalstockapp.git
+cd hospitalstockapp
 ```
 
 2. Install dependencies:
@@ -45,7 +63,7 @@ python run.py
 
 ## Download Pre-built Executable
 
-Go to the [Actions tab](https://github.com/MalayM09/hospital_stock_app/actions) on GitHub, click on the latest successful build, and download the executable from the Artifacts section.
+Go to the [Actions tab](https://github.com/MalayM09/hospitalstockapp/actions) on GitHub, click on the latest successful build, and download the executable from the Artifacts section.
 
 - **Windows:** Download `HospitalStockApp-Windows`
 - **Mac:** Download `HospitalStockApp-Mac`
@@ -53,7 +71,7 @@ Go to the [Actions tab](https://github.com/MalayM09/hospital_stock_app/actions) 
 ## Project Structure
 
 ```
-hospital_stock_app/
+hospitalstockapp/
 ├── run.py                    # Entry point
 ├── requirements.txt          # Python dependencies
 ├── hospital_stock_app.spec   # PyInstaller configuration

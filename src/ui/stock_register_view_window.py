@@ -252,11 +252,13 @@ class StockRegisterViewWindow(QWidget):
         self.display_records(filtered)
 
     def display_records(self, records):
+        self.table.clearSpans()  # a previous "No data found" row may have merged cells
         self.table.setRowCount(len(records))
 
         data_for_export = []
 
         for row_idx, record in enumerate(records):
+            record = {**record, 'sr_no': row_idx + 1}  # sequential numbering, not database IDs
             self.table.setItem(row_idx, 0, QTableWidgetItem(str(record['sr_no'])))
             self.table.setItem(row_idx, 1, QTableWidgetItem(record['lab_item']))
             self.table.setItem(row_idx, 2, QTableWidgetItem(str(record['received_qty'])))

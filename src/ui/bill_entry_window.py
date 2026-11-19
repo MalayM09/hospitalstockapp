@@ -3,10 +3,11 @@ from PyQt6.QtWidgets import (
     QPushButton, QMessageBox, QListWidget, QDateEdit, QFrame, QScrollArea, QGridLayout
 )
 from PyQt6.QtCore import Qt, QDate
-from decimal import Decimal, ROUND_HALF_UP
 
 from services.db_service import get_db
 from services.bill_service import BillService
+from services.gst import GST_RATES, compute_totals
+from services.stock_service import StockError
 from services.vendor_service import VendorService
 from services.item_service import ItemService
 
@@ -84,9 +85,11 @@ class BillEntryWindow(QWidget):
         row2.addLayout(inv_num_layout)
 
         inv_date_layout = QVBoxLayout()
-        inv_date_layout.addWidget(self.create_label("Invoice Date"))
+        inv_date_layout.addWidget(self.create_label("Invoice Date (stock is received on this date)"))
         self.invoice_date_input = QDateEdit()
+        self.invoice_date_input.setDisplayFormat("dd-MM-yyyy")
         self.invoice_date_input.setDate(QDate.currentDate())
+        self.invoice_date_input.setMaximumDate(QDate.currentDate())
         self.invoice_date_input.setCalendarPopup(True)
         self.style_date(self.invoice_date_input)
         inv_date_layout.addWidget(self.invoice_date_input)
@@ -104,6 +107,7 @@ class BillEntryWindow(QWidget):
         expiry_layout = QVBoxLayout()
         expiry_layout.addWidget(self.create_label("Expiry Date"))
         self.expiry_date_input = QDateEdit()
+        self.expiry_date_input.setDisplayFormat("dd-MM-yyyy")
         self.expiry_date_input.setDate(QDate.currentDate().addYears(1))
         self.expiry_date_input.setCalendarPopup(True)
         self.style_date(self.expiry_date_input)
@@ -122,48 +126,47 @@ class BillEntryWindow(QWidget):
         form_layout.addLayout(row3b)
 
         # Amount
-        form_layout.addWidget(self.create_label("Amount per Unit (₹)"))
+        form_layout.addWidget(self.create_label("Rate per Unit, before GST (₹)"))
         self.amount_input = self.create_input("0.00")
         self.amount_input.textChanged.connect(self.calculate_taxes)
         form_layout.addWidget(self.amount_input)
 
-        # Tax percentages
+        # GST: pick the total rate on the invoice; it is split into CGST+SGST
+        # (same state) or charged as IGST (other state)
         row4 = QHBoxLayout()
-        cgst_layout = QVBoxLayout()
-        cgst_layout.addWidget(self.create_label("CGST %"))
-        self.cgst_percent_dropdown = QComboBox()
-        self.cgst_percent_dropdown.addItem("0%", 0)
-        self.cgst_percent_dropdown.addItem("5%", 5)
-        self.cgst_percent_dropdown.addItem("9%", 9)
-        self.cgst_percent_dropdown.addItem("18%", 18)
-        self.style_combo(self.cgst_percent_dropdown)
-        self.cgst_percent_dropdown.currentIndexChanged.connect(self.calculate_taxes)
-        cgst_layout.addWidget(self.cgst_percent_dropdown)
-        row4.addLayout(cgst_layout)
+        gst_layout = QVBoxLayout()
+        gst_layout.addWidget(self.create_label("GST Rate (total)"))
+        self.gst_rate_dropdown = QComboBox()
+        for rate in GST_RATES:
+            self.gst_rate_dropdown.addItem(f"{rate}%", rate)
+        self.style_combo(self.gst_rate_dropdown)
+        self.gst_rate_dropdown.currentIndexChanged.connect(self.calculate_taxes)
+        gst_layout.addWidget(self.gst_rate_dropdown)
+        row4.addLayout(gst_layout)
 
-        sgst_layout = QVBoxLayout()
-        sgst_layout.addWidget(self.create_label("SGST %"))
-        self.sgst_percent_dropdown = QComboBox()
-        self.sgst_percent_dropdown.addItem("0%", 0)
-        self.sgst_percent_dropdown.addItem("5%", 5)
-        self.sgst_percent_dropdown.addItem("9%", 9)
-        self.sgst_percent_dropdown.addItem("18%", 18)
-        self.style_combo(self.sgst_percent_dropdown)
-        self.sgst_percent_dropdown.currentIndexChanged.connect(self.calculate_taxes)
-        sgst_layout.addWidget(self.sgst_percent_dropdown)
-        row4.addLayout(sgst_layout)
+        type_layout = QVBoxLayout()
+        type_layout.addWidget(self.create_label("Tax Type"))
+        self.tax_type_dropdown = QComboBox()
+        self.tax_type_dropdown.addItem("Same state (CGST + SGST)", False)
+        self.tax_type_dropdown.addItem("Other state (IGST)", True)
+        self.style_combo(self.tax_type_dropdown)
+        self.tax_type_dropdown.currentIndexChanged.connect(self.calculate_taxes)
+        type_layout.addWidget(self.tax_type_dropdown)
+        row4.addLayout(type_layout)
         form_layout.addLayout(row4)
 
         # Tax values (read-only)
         row5 = QHBoxLayout()
         cgst_val_layout = QVBoxLayout()
-        cgst_val_layout.addWidget(self.create_label("CGST (₹)"))
+        self.cgst_caption = self.create_label("CGST (₹)")
+        cgst_val_layout.addWidget(self.cgst_caption)
         self.cgst_value_label = self.create_input("0.00", readonly=True)
         cgst_val_layout.addWidget(self.cgst_value_label)
         row5.addLayout(cgst_val_layout)
 
         sgst_val_layout = QVBoxLayout()
-        sgst_val_layout.addWidget(self.create_label("SGST (₹)"))
+        self.sgst_caption = self.create_label("SGST (₹)")
+        sgst_val_layout.addWidget(self.sgst_caption)
         self.sgst_value_label = self.create_input("0.00", readonly=True)
         sgst_val_layout.addWidget(self.sgst_value_label)
         row5.addLayout(sgst_val_layout)
@@ -375,42 +378,32 @@ class BillEntryWindow(QWidget):
             }
         """)
 
+    def _clear_totals(self):
+        for w in (self.cgst_value_label, self.sgst_value_label, self.round_off_label, self.net_amount_label):
+            w.setText("")
+
     def calculate_taxes(self):
+        interstate = bool(self.tax_type_dropdown.currentData())
+        self.cgst_caption.setText("IGST (₹)" if interstate else "CGST (₹)")
+        self.sgst_caption.setText("—" if interstate else "SGST (₹)")
+        qty_text = self.quantity_input.text().strip()
+        rate_text = self.amount_input.text().strip()
+        if not qty_text or not rate_text:
+            self._clear_totals()
+            return
         try:
-            qty_text = self.quantity_input.text().strip()
-            amount_text = self.amount_input.text().strip()
-            
-            if not qty_text or not amount_text:
-                self.cgst_value_label.setText("")
-                self.sgst_value_label.setText("")
-                self.round_off_label.setText("")
-                self.net_amount_label.setText("")
-                return
-
-            quantity = Decimal(qty_text)
-            amount_per_unit = Decimal(amount_text)
-            total_amount = quantity * amount_per_unit
-            
-            cgst_percent = Decimal(self.cgst_percent_dropdown.currentData() or 0)
-            sgst_percent = Decimal(self.sgst_percent_dropdown.currentData() or 0)
-
-            cgst_amount = (total_amount * cgst_percent / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            sgst_amount = (total_amount * sgst_percent / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-            subtotal = total_amount + cgst_amount + sgst_amount
-            rounded_total = subtotal.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
-            round_off = rounded_total - subtotal
-
-            self.cgst_value_label.setText(str(cgst_amount))
-            self.sgst_value_label.setText(str(sgst_amount))
-            self.round_off_label.setText(str(round_off))
-            self.net_amount_label.setText(str(rounded_total))
-
-        except Exception:
-            self.cgst_value_label.setText("")
+            t = compute_totals(qty_text, rate_text, self.gst_rate_dropdown.currentData() or 0, interstate)
+        except ValueError:
+            self._clear_totals()
+            return
+        if interstate:
+            self.cgst_value_label.setText(f"{t['igst']:.2f}")
             self.sgst_value_label.setText("")
-            self.round_off_label.setText("")
-            self.net_amount_label.setText("")
+        else:
+            self.cgst_value_label.setText(f"{t['cgst']:.2f}")
+            self.sgst_value_label.setText(f"{t['sgst']:.2f}")
+        self.round_off_label.setText(f"{t['round_off']:.2f}")
+        self.net_amount_label.setText(f"{t['net_amount']:.2f}")
 
     def load_vendors(self):
         self.vendor_dropdown.clear()
@@ -444,64 +437,66 @@ class BillEntryWindow(QWidget):
         if vendor_id is None:
             QMessageBox.warning(self, "Error", "Please add/select a vendor first.")
             return
-
         if item_id is None:
             QMessageBox.warning(self, "Error", "Please add/select an item first.")
             return
 
-        try:
-            invoice_number = self.invoice_number_input.text().strip()
-            invoice_date = self.invoice_date_input.date().toString("yyyy-MM-dd")
-            batch_number = self.batch_number_input.text().strip()
-            expiry_date = self.expiry_date_input.date().toString("yyyy-MM-dd")
-            quantity = int(self.quantity_input.text() or 0)
-            amount_per_unit = float(self.amount_input.text() or 0)
-            total_amount = quantity * amount_per_unit
-            cgst = float(self.cgst_value_label.text() or 0)
-            sgst = float(self.sgst_value_label.text() or 0)
-            round_off = float(self.round_off_label.text() or 0)
-        except ValueError:
-            QMessageBox.warning(self, "Error", "Please enter valid numeric values.")
-            return
-
+        invoice_number = self.invoice_number_input.text().strip()
         if not invoice_number:
             QMessageBox.warning(self, "Error", "Please enter an invoice number.")
             return
 
-        self.bill_service.add_bill(
-            item_id=item_id,
-            vendor_id=vendor_id,
-            invoice_number=invoice_number,
-            invoice_date=invoice_date,
-            batch_number=batch_number,
-            expiry_date=expiry_date,
-            quantity=quantity,
-            amount=total_amount,
-            cgst=cgst,
-            sgst=sgst,
-            round_off=round_off
-        )
+        qty_text = self.quantity_input.text().strip()
+        if not qty_text.isdigit() or int(qty_text) <= 0:
+            QMessageBox.warning(self, "Error", "Quantity must be a whole number greater than zero.")
+            return
+        try:
+            rate = float(self.amount_input.text().strip() or 0)
+        except ValueError:
+            QMessageBox.warning(self, "Error", "Amount per unit must be a number (e.g. 125.50).")
+            return
+        if rate < 0:
+            QMessageBox.warning(self, "Error", "Amount per unit cannot be negative.")
+            return
+
+        try:
+            self.bill_service.add_bill(
+                item_id=item_id,
+                vendor_id=vendor_id,
+                invoice_number=invoice_number,
+                invoice_date=self.invoice_date_input.date().toString("yyyy-MM-dd"),
+                batch_number=self.batch_number_input.text().strip(),
+                expiry_date=self.expiry_date_input.date().toString("yyyy-MM-dd"),
+                quantity=int(qty_text),
+                rate=rate,
+                gst_rate=self.gst_rate_dropdown.currentData() or 0,
+                interstate=bool(self.tax_type_dropdown.currentData()),
+            )
+        except StockError as e:
+            QMessageBox.warning(self, "Cannot Save", str(e))
+            return
 
         QMessageBox.information(self, "Success", "Bill saved successfully!")
         self.load_recent_bills()
         self.clear_inputs()
 
     def clear_inputs(self):
-        self.invoice_number_input.clear()
+        """
+        Clear the item-specific fields. Vendor, invoice number, invoice date,
+        GST rate and tax type are kept, since an invoice usually has several
+        items that are entered one after another.
+        """
         self.batch_number_input.clear()
         self.quantity_input.clear()
         self.amount_input.clear()
-        self.cgst_percent_dropdown.setCurrentIndex(0)
-        self.sgst_percent_dropdown.setCurrentIndex(0)
-        self.cgst_value_label.clear()
-        self.sgst_value_label.clear()
-        self.round_off_label.clear()
-        self.net_amount_label.clear()
+        self._clear_totals()
+        self.item_dropdown.setFocus()
 
     def load_recent_bills(self):
         self.bill_list.clear()
-        bills = self.bill_service.get_recent_bills()
-        for b in bills:
+        for b in self.bill_service.get_recent_bills():
             self.bill_list.addItem(
-                f"#{b['id']} | {b['entry_date']} | {b['vendor']} | {b['invoice_number']} | ₹{b['net_amount']}"
+                f"#{b['id']} | {b['invoice_date'] or b['entry_date']} | {b['vendor']} | "
+                f"{b['item_name'] or '-'} x {b['quantity']} | Inv {b['invoice_number']} | "
+                f"₹{b['net_amount']:.2f}"
             )

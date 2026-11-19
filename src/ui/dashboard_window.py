@@ -14,6 +14,7 @@ from ui.reports_window import ReportsWindow
 from ui.stock_register_view_window import StockRegisterViewWindow
 from ui.bill_details_view_window import BillDetailsViewWindow
 from ui.stock_issuance_register_window import StockIssuanceRegisterWindow
+from ui.backup_window import BackupWindow, style_banner
 
 
 class DashboardWindow(QWidget):
@@ -119,6 +120,18 @@ class DashboardWindow(QWidget):
         """)
         content_layout.addWidget(subtitle)
 
+        # Backup status - always visible so a missing off-site backup gets noticed
+        self.backup_banner = QLabel()
+        self.backup_banner.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.backup_banner.setToolTip("Click to open Backup & Restore")
+        self.backup_banner.mousePressEvent = lambda event: self.open_backup_window()
+        content_layout.addWidget(self.backup_banner)
+        self.refresh_backup_banner()
+        from services.backup_scheduler import get_scheduler
+        scheduler = get_scheduler()
+        if scheduler:
+            scheduler.status_changed.connect(self.refresh_backup_banner)
+
         # Dashboard Cards Grid
         cards_grid = QGridLayout()
         cards_grid.setSpacing(20)
@@ -133,6 +146,7 @@ class DashboardWindow(QWidget):
             ("📑", "Issuance Register", "View stock issuance history", "#D32F2F", self.open_stock_issuance_register),
             ("📄", "Bill Details", "View all bill details", "#E65100", self.open_bill_details_view),
             ("📊", "Reports", "Generate reports", "#1976D2", self.open_reports),
+            ("🛡️", "Backup & Restore", "Keep your data safe", "#37474F", self.open_backup_window),
         ]
 
         for i, (icon, title, desc, color, callback) in enumerate(menu_items):
@@ -242,6 +256,15 @@ class DashboardWindow(QWidget):
     def open_stock_issuance_register(self):
         self.stock_issuance_register = StockIssuanceRegisterWindow()
         self.stock_issuance_register.showMaximized()
+
+    def refresh_backup_banner(self):
+        from services.backup_service import BackupService
+        from services.db_service import get_db
+        style_banner(self.backup_banner, BackupService(get_db()).status_summary())
+
+    def open_backup_window(self):
+        self.backup_window = BackupWindow()
+        self.backup_window.showMaximized()
 
     def logout(self):
         self.close()

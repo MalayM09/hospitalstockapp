@@ -1,12 +1,18 @@
 """
-Seed data module for Hospital Stock Management App.
-Seeds initial vendors, items, and stock quantities into the database.
-Uses DatabaseService to ensure consistent database access.
+First-run setup: default admin user, vendor list and item list.
+
+Seeding happens ONCE, on a brand-new database (tracked by the 'seeded' flag in
+app_meta). Previously this ran on every launch, so any default vendor or item
+the user deleted came back the next time the app started.
+
+Opening stock quantities are deliberately NOT seeded: they were a stale
+snapshot, and inserting them dated "today" on a fresh install would corrupt
+the register before historical data is imported.
 """
-from datetime import datetime
+import logging
 
+log = logging.getLogger(__name__)
 
-# Sample vendor list (13 vendors)
 VENDORS = [
     "SEEMA CHEMICALS",
     "RIDDHI TRADERS",
@@ -20,122 +26,44 @@ VENDORS = [
     "RBM DISRIBUTOR",
     "MATRIX BIOMEDICAL",
     "JP ENTERPRISE",
-    "PRAKHAR ENTERPRISE"
+    "PRAKHAR ENTERPRISE",
 ]
 
-# Items with their initial stock quantities (item_name: quantity)
-ITEMS_WITH_QUANTITY = {
-    "Glucose Kit": 0,
-    "Serum cholesterol": 0,
-    "Serum triglyceride": 0,
-    "Blood urea": 0,
-    "Serum creatinine": 0,
-    "atotal bilirubin": 0,
-    "Serum SGPT": 0,
-    "Serum Alkaline phosphate": 0,
-    "Serum uric acid": 0,
-    "HBA1C": 0,
-    "CRP Kit": 0,
-    "RA": 2,
-    "Serum widal": 1,
-    "Pregnancy test": 50,
-    "M.T. test": 0,
-    "Urine strick": 5,
-    "Blood group": 0,
-    "Cell pack (diluent foe 3-part)": 0,
-    "Dengue card": 30,
-    "Cell clean": 0,
-    "Vaccurate k3. E.D.T.A.": 500,
-    "Vaccurate k3. Plain": 600,
-    "Vaccurate k3. FLUORIDE": 300,
-    "Giemasa stain": 2,
-    "Printer Roll": 4,
-    "Stromatolyser (lyse solution for 3 part)": 0,
-    "Distilled water": 4,
-    "Micro slide": 2,
-    "Cover slip": 4,
-    "Filter paper": 1,
-    "PM KIT(ERBA EM DESTINY 180)": 0,
-    "Paper tape": 0,
-    "Yellow tips": 0,
-    "Blue tips": 0,
-    "ESR tube": 0,
-    "Tissue paper roll": 3,
-    "Cleaner wood oil": 2,
-    "Turniket belt": 3,
-    "Fouchets reagent": 0,
-    "Barium Chloride": 0,
-    "Malaria card": 50,
-    "Urine container beaker": 30,
-    "ROTER": 3,
-    "XL AUTO WASH": 1,
-    "XL MULTICA ERBA NORM": 0,
-    "Blood collection needle 22g": 4,
-    "Collection vial 1.5 ml": 0,
-    "URBA Path": 0,
-    "URBA XL MULITCAL": 0,
-    "CRP": 0
-}
-
-# Keep ITEMS list for backwards compatibility
-ITEMS = list(ITEMS_WITH_QUANTITY.keys())
+ITEMS = [
+    "Glucose Kit", "Serum cholesterol", "Serum triglyceride", "Blood urea",
+    "Serum creatinine", "atotal bilirubin", "Serum SGPT", "Serum Alkaline phosphate",
+    "Serum uric acid", "HBA1C", "CRP Kit", "RA", "Serum widal", "Pregnancy test",
+    "M.T. test", "Urine strick", "Blood group", "Cell pack (diluent foe 3-part)",
+    "Dengue card", "Cell clean", "Vaccurate k3. E.D.T.A.", "Vaccurate k3. Plain",
+    "Vaccurate k3. FLUORIDE", "Giemasa stain", "Printer Roll",
+    "Stromatolyser (lyse solution for 3 part)", "Distilled water", "Micro slide",
+    "Cover slip", "Filter paper", "PM KIT(ERBA EM DESTINY 180)", "Paper tape",
+    "Yellow tips", "Blue tips", "ESR tube", "Tissue paper roll", "Cleaner wood oil",
+    "Turniket belt", "Fouchets reagent", "Barium Chloride", "Malaria card",
+    "Urine container beaker", "ROTER", "XL AUTO WASH", "XL MULTICA ERBA NORM",
+    "Blood collection needle 22g", "Collection vial 1.5 ml", "URBA Path",
+    "URBA XL MULITCAL", "CRP",
+]
 
 
-def seed_data():
-    """
-    Seed initial vendors, items, and stock into the database.
-    Uses DatabaseService to ensure consistent database access with the rest of the app.
-    Uses INSERT OR IGNORE to avoid duplicates on subsequent runs.
-    """
-    # Import here to avoid circular imports
-    from services.db_service import DatabaseService
-    
-    db = DatabaseService()
-    
-    # Insert vendors
-    for vendor in VENDORS:
-        try:
-            db.execute(
-                "INSERT OR IGNORE INTO vendors (name) VALUES (?)",
-                (vendor,)
-            )
-        except Exception:
-            pass  # Ignore duplicates
-
-    # Insert items
-    for item_name in ITEMS_WITH_QUANTITY.keys():
-        try:
-            db.execute(
-                "INSERT OR IGNORE INTO items (name) VALUES (?)",
-                (item_name,)
-            )
-        except Exception:
-            pass  # Ignore duplicates
-
-    # Add initial stock quantities to stock_register
-    # Only add entries for items with quantity > 0
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    for item_name, quantity in ITEMS_WITH_QUANTITY.items():
-        if quantity > 0:
-            # Get the item_id for this item
-            result = db.fetch_one("SELECT id FROM items WHERE name = ?", (item_name,))
-            if result:
-                item_id = result['id']
-                # Check if there's already a stock entry for this item
-                existing = db.fetch_one("SELECT id FROM stock_register WHERE item_id = ?", (item_id,))
-                if not existing:
-                    # Insert initial stock as received stock
-                    try:
-                        db.execute("""
-                            INSERT INTO stock_register (item_id, vendor_id, received_qty, issued_qty, balance_qty, date)
-                            VALUES (?, NULL, ?, 0, ?, ?)
-                        """, (item_id, quantity, quantity, today))
-                    except Exception:
-                        pass  # Ignore errors
-
-    print("✅ Vendors, Items & Initial Stock seeded successfully.")
+def ensure_admin_user(db):
+    """Create the default admin/admin login if there are no users at all."""
+    if db.scalar("SELECT COUNT(*) FROM users") == 0:
+        import bcrypt
+        hashed = bcrypt.hashpw(b"admin", bcrypt.gensalt()).decode("utf-8")
+        db.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", ("admin", hashed))
+        log.info("Created default admin user")
 
 
-if __name__ == "__main__":
-    seed_data()
+def seed_if_first_run(db):
+    """Insert default vendors and items, only on a brand-new database."""
+    if db.scalar("SELECT value FROM app_meta WHERE key = 'seeded'"):
+        return False
+    with db.transaction():
+        for name in VENDORS:
+            db.execute("INSERT OR IGNORE INTO vendors (name) VALUES (?)", (name,))
+        for name in ITEMS:
+            db.execute("INSERT OR IGNORE INTO items (name) VALUES (?)", (name,))
+        db.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('seeded', '1')")
+    log.info("First run: seeded %d vendors and %d items", len(VENDORS), len(ITEMS))
+    return True
