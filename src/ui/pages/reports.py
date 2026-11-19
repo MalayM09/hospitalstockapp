@@ -1,13 +1,47 @@
 from datetime import date
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QVBoxLayout
 
 from services.report_service import REPORTS, run_report
 from ui.pages.base import Page
 from ui.printing import print_report
+from ui.theme import COLORS
 from ui.widgets import Card, DataTable, DateRangeBar, button, label, toast
 from utils.formatting import format_cell
+
+
+class ReportEntry(QFrame):
+    """One clickable report in the left column: bold name + grey description."""
+    clicked = pyqtSignal(str)
+
+    def __init__(self, key, name, desc):
+        super().__init__()
+        self.key = key
+        self.setObjectName("reportEntry")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 8, 10, 8)
+        lay.setSpacing(2)
+        lay.addWidget(label(name, "strong"))
+        lay.addWidget(label(desc, "caption", wrap=True))
+        self.set_selected(False)
+
+    def set_selected(self, selected):
+        bg = COLORS["accent_soft"] if selected else "transparent"
+        hover = COLORS["accent_soft"] if selected else COLORS["row_hover"]
+        self.setStyleSheet(f"#reportEntry {{ background:{bg}; border-radius:8px; }}"
+                           f"#reportEntry:hover {{ background:{hover}; }}")
+
+    def mousePressEvent(self, e):
+        self.clicked.emit(self.key)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.clicked.emit(self.key)
+        else:
+            super().keyPressEvent(e)
 
 
 class ReportsPage(Page):
@@ -33,22 +67,14 @@ class ReportsPage(Page):
         pick = Card(margins=(10, 12, 10, 12), spacing=6)
         pick.setFixedWidth(270)
         pick.add(label("  REPORTS", "section"))
-        self.list = QListWidget()
-        self.list.setStyleSheet("QListWidget { border: none; padding: 0; }")
-        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.entries = {}
         for key, name, desc in REPORTS:
-            it = QListWidgetItem()
-            it.setData(Qt.ItemDataRole.UserRole, key)
-            entry = QWidget()
-            el = QVBoxLayout(entry)
-            el.setContentsMargins(10, 7, 6, 7)
-            el.setSpacing(1)
-            el.addWidget(label(name, "strong"))
-            el.addWidget(label(desc, "caption", wrap=True))
-            it.setSizeHint(entry.sizeHint())
-            self.list.addItem(it)
-            self.list.setItemWidget(it, entry)
-        pick.add(self.list, 1)
+            entry = ReportEntry(key, name, desc)
+            entry.clicked.connect(self.select)
+            self.entries[key] = entry
+            pick.add(entry)
+        pick.layout_.addStretch()
+        self.current_key = None
         body.addWidget(pick)
 
         self.result = Card(margins=(18, 16, 18, 12), spacing=8)
@@ -67,16 +93,20 @@ class ReportsPage(Page):
         self.root.addLayout(body, 1)
 
         self.table = None
-        self.list.currentRowChanged.connect(lambda _r: self.refresh())
         self.range.changed.connect(lambda *_: self.refresh())
-        self.list.setCurrentRow(0)
+        self.select(REPORTS[0][0])
+
+    def select(self, key):
+        self.current_key = key
+        for k, entry in self.entries.items():
+            entry.set_selected(k == key)
+        self.refresh()
 
     def refresh(self):
-        item = self.list.currentItem()
-        if not item:
+        if not self.current_key:
             return
         start, end = self.range.range()
-        self.report = run_report(item.data(Qt.ItemDataRole.UserRole), start, end)
+        self.report = run_report(self.current_key, start, end)
         r = self.report
         if self.range.quick.currentText() == "All time":
             r.period = "All time"

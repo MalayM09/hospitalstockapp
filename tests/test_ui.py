@@ -191,10 +191,13 @@ def test_masters_reports_backup(ui_env, qapp, db, ids, tmp_path):
 
     w.navigate("reports")
     r = w.current
-    for i in range(r.list.count()):
-        r.list.setCurrentRow(i)
+    for key in r.entries:
+        r.select(key)
         qapp.processEvents()
         assert r.report is not None and r.table is not None
+    # report entries must never overlap
+    boxes = sorted((e.y(), e.y() + e.height()) for e in r.entries.values())
+    assert all(a[1] <= b[0] for a, b in zip(boxes, boxes[1:]))
 
     from ui.printing import build_html
     html = build_html("T", ["Item", "Qty"], [("A & B <x>", "1")], ["text", "int"])
