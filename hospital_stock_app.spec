@@ -68,6 +68,7 @@ a = Analysis(
         'utils.db_path',
         'utils.settings',
         'utils.error_handling',
+        'utils.preview',
     ],
     hookspath=[],
     hooksconfig={},
@@ -86,25 +87,48 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='HospitalStockApp',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,  # Set to False for GUI app (no console window)
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=None,  # Add 'icon.ico' here if you have an icon
-)
+if sys.platform == 'darwin':
+    # macOS: a proper HospitalStockApp.app bundle (used for previewing on a Mac)
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='HospitalStockApp',
+        debug=False,
+        strip=False,
+        upx=False,
+        console=False,
+        argv_emulation=False,
+    )
+    coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, strip=False, upx=False, name='HospitalStockApp')
+    app = BUNDLE(
+        coll,
+        name='HospitalStockApp.app',
+        bundle_identifier='org.hospitalstock.app',
+        info_plist={'NSHighResolutionCapable': True, 'CFBundleShortVersionString': '1.1.0'},
+    )
+else:
+    # Windows: single-file HospitalStockApp.exe (unchanged)
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name='HospitalStockApp',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,  # GUI app (no console window)
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=None,  # Add 'icon.ico' here if you have an icon
+    )

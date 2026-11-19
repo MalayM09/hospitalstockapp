@@ -113,6 +113,9 @@ def main():
     from ui.theme import apply_theme
     apply_theme(app)
 
+    from utils.preview import apply_screen_simulation
+    apply_screen_simulation()
+
     try:
         _check_existing_database(app)
         db = _prepare_database()

@@ -70,9 +70,13 @@ jobs:
       run: |
         pyinstaller hospital_stock_app.spec --clean
 
-    - name: Upload Mac Executable
+    - name: Zip Mac app
+      run: |
+        cd dist && ditto -c -k --keepParent HospitalStockApp.app HospitalStockApp-Mac.zip
+
+    - name: Upload Mac App
       uses: actions/upload-artifact@v4
       with:
         name: HospitalStockApp-Mac
-        path: dist/HospitalStockApp
+        path: dist/HospitalStockApp-Mac.zip
         retention-days: 30

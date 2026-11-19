@@ -61,3 +61,7 @@ data/
 # Local configuration
 .env
 .env.local
+
+# Mac preview
+.venv/
+preview_data/

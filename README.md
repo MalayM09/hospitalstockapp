@@ -97,6 +97,18 @@ hospitalstockapp/
     └── backups/              # Automatic backups
 ```
 
+## Previewing on a Mac
+
+- **`run_mac.command`** (double-click): sets everything up on first run, fills
+  `preview_data/` with sample data, and starts the app. Option 2 simulates the
+  hospital PC's 1366x768 screen so you can see what fits. Delete `preview_data/`
+  to reset the sample data.
+- **`build_mac.command`** (double-click): builds `dist/HospitalStockApp.app`
+  the same way the Windows `.exe` is built.
+
+Fonts and emoji icons differ slightly between macOS and Windows; for an exact
+check, run the Windows `.exe` from GitHub Actions in a Windows VM.
+
 ## Building Executable Locally
 
 ```bash
