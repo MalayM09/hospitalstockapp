@@ -8,7 +8,7 @@ Startup sequence:
   3. If the database is damaged -> offer to restore from a backup
   4. Back up before upgrading an older database, then apply migrations
   5. Create default admin user; seed default vendors/items on first run only
-  6. Start the backup scheduler and show the login screen
+  6. Start the backup scheduler and show the sign-in screen
 """
 import logging
 import os
@@ -28,7 +28,7 @@ def _check_existing_database(app):
     """Steps 2-3. Returns normally to continue startup."""
     from services.backup_service import BackupService, check_integrity
     from services.db_service import get_db
-    from ui.backup_window import StartupRestoreDialog
+    from ui.backup_ui import StartupRestoreDialog
 
     db_path = get_database_path()
     is_new = not db_path.exists() or db_path.stat().st_size == 0
@@ -94,13 +94,49 @@ def _prepare_database():
     return db
 
 
-def _warn_if_no_offsite_backup(scheduler):
+def _warn_if_no_offsite_backup(scheduler, parent):
+    """At most once a day: a clear warning when no off-site backup exists."""
+    from datetime import date
+    from utils import settings
     summary = scheduler.service.status_summary()
-    if summary["level"] == "danger":
-        QMessageBox.warning(
-            None, "Backup Warning",
-            summary["text"] + "\n\nYou can set this up from the dashboard: Backup & Restore.",
-        )
+    today = date.today().isoformat()
+    if summary["level"] == "danger" and settings.get("offsite_warned_date") != today:
+        settings.set("offsite_warned_date", today)
+        QMessageBox.warning(parent, "Backup warning",
+                            summary["text"] + "\n\nSet this up in Backup & Restore (left menu).")
+
+
+class App:
+    """Sign-in window <-> main window."""
+
+    def __init__(self, scheduler):
+        from ui.login_window import LoginWindow
+        self.scheduler = scheduler
+        self.main = None
+        self.login = LoginWindow()
+        self.login.logged_in.connect(self.on_login)
+
+    def start(self):
+        self.login.showMaximized()
+
+    def on_login(self, username):
+        from services.user_service import UserService
+        from ui.main_window import MainWindow
+        from ui.widgets import Toast
+        self.main = MainWindow(username)
+        self.main.logged_out.connect(self.on_logout)
+        self.main.showMaximized()
+        self.login.hide()
+        _warn_if_no_offsite_backup(self.scheduler, self.main)
+        if UserService().is_default_password(username):
+            Toast(self.main, "You are using the default password — change it from the account menu "
+                             "(bottom left).", "info", msec=7000)
+
+    def on_logout(self):
+        self.login.showMaximized()
+        if self.main is not None:
+            self.main.deleteLater()
+            self.main = None
 
 
 def main():
@@ -139,12 +175,8 @@ def main():
 
     app.aboutToQuit.connect(on_quit)
 
-    from ui.login_window import LoginWindow
-    login_window = LoginWindow()
-    login_window.showMaximized()
-
-    _warn_if_no_offsite_backup(scheduler)
-
+    controller = App(scheduler)
+    controller.start()
     sys.exit(app.exec())
 
 

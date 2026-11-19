@@ -20,9 +20,9 @@ if [ ! -x .venv/bin/python ]; then
     "$PY" -m venv .venv || { echo "Could not create .venv"; return 1; }
 fi
 # Re-install only when requirements.txt changed
-if [ ! -f .venv/.req_stamp ] || [ requirements.txt -nt .venv/.req_stamp ]; then
+if [ ! -f .venv/.req_stamp ] || [ requirements.txt -nt .venv/.req_stamp ] || [ requirements-dev.txt -nt .venv/.req_stamp ]; then
     .venv/bin/python -m pip install -q --upgrade pip
-    .venv/bin/python -m pip install -q -r requirements.txt || {
+    .venv/bin/python -m pip install -q -r requirements-dev.txt || {
         echo "Installing dependencies failed (check the internet connection)."
         read -p "Press Enter to close."; return 1; }
     touch .venv/.req_stamp

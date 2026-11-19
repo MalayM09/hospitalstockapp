@@ -19,8 +19,22 @@ from datetime import date as _date, datetime
 from services.db_service import get_db
 
 
+# Items at or below this balance are shown as "Low". (Per-item minimum levels
+# can replace this later.)
+LOW_STOCK_LEVEL = 10
+
+
 class StockError(ValueError):
     """A stock change that was refused, with a message suitable for the user."""
+
+
+def stock_status(balance):
+    """'out', 'low' or 'ok' for a balance."""
+    if balance <= 0:
+        return "out"
+    if balance <= LOW_STOCK_LEVEL:
+        return "low"
+    return "ok"
 
 
 def _today():
@@ -36,12 +50,6 @@ class StockService:
         self.db = get_db()
 
     # ---- lookups -------------------------------------------------------------
-
-    def get_vendors(self):
-        return self.db.fetch_all("SELECT id, name FROM vendors ORDER BY name")
-
-    def get_items(self):
-        return self.db.fetch_all("SELECT id, name FROM items ORDER BY name")
 
     def _item_name(self, item_id):
         return self.db.scalar("SELECT name FROM items WHERE id = ?", (item_id,)) or f"item #{item_id}"
@@ -174,34 +182,6 @@ class StockService:
             params.append(as_of)
         return self.db.scalar(query, params) or 0
 
-    def get_all_balances(self):
-        return self.db.fetch_all("""
-            SELECT i.id, i.name,
-                   COALESCE(SUM(s.received_qty), 0) AS total_received,
-                   COALESCE(SUM(s.issued_qty), 0) AS total_issued,
-                   COALESCE(SUM(s.received_qty), 0) - COALESCE(SUM(s.issued_qty), 0) AS balance
-            FROM items i
-            LEFT JOIN stock_register s ON i.id = s.item_id
-            GROUP BY i.id, i.name
-            ORDER BY i.name
-        """)
-
-    def get_stock_history(self, item_id=None, limit=50):
-        query = """
-            SELECT s.id, s.date, i.name AS item_name, v.name AS vendor_name,
-                   s.received_qty, s.issued_qty, s.txn_type, s.remarks
-            FROM stock_register s
-            JOIN items i ON s.item_id = i.id
-            LEFT JOIN vendors v ON s.vendor_id = v.id
-        """
-        params = []
-        if item_id:
-            query += " WHERE s.item_id = ?"
-            params.append(item_id)
-        query += " ORDER BY s.date DESC, s.id DESC LIMIT ?"
-        params.append(limit)
-        return self.db.fetch_all(query, params)
-
     def get_recent_issues(self, limit=50):
         return self.db.fetch_all("""
             SELECT s.id, s.date, i.name AS item_name, s.issued_qty, s.remarks
@@ -211,16 +191,39 @@ class StockService:
         """, (limit,))
 
     def get_stock_register_view(self):
-        """Stock summary per item for table display."""
+        """Current stock per item: id, name, received, issued, balance."""
         return self.db.fetch_all("""
-            SELECT
-                i.id AS sr_no,
-                i.name AS lab_item,
-                COALESCE(SUM(s.received_qty), 0) AS received_qty,
-                COALESCE(SUM(s.issued_qty), 0) AS issued_qty,
-                COALESCE(SUM(s.received_qty), 0) - COALESCE(SUM(s.issued_qty), 0) AS balance_qty
+            SELECT i.id, i.name,
+                   COALESCE(SUM(s.received_qty), 0) AS received,
+                   COALESCE(SUM(s.issued_qty), 0) AS issued,
+                   COALESCE(SUM(s.received_qty), 0) - COALESCE(SUM(s.issued_qty), 0) AS balance
             FROM items i
             LEFT JOIN stock_register s ON i.id = s.item_id
             GROUP BY i.id, i.name
-            ORDER BY i.name ASC
+            ORDER BY i.name COLLATE NOCASE
         """)
+
+    def item_ledger(self, item_id):
+        """Every movement of one item, oldest first, with a running balance."""
+        rows = self.db.fetch_all("""
+            SELECT s.id, s.date, s.txn_type, COALESCE(v.name, '') AS vendor,
+                   COALESCE(s.remarks, '') AS remarks,
+                   COALESCE(s.received_qty, 0) AS qty_in, COALESCE(s.issued_qty, 0) AS qty_out
+            FROM stock_register s LEFT JOIN vendors v ON v.id = s.vendor_id
+            WHERE s.item_id = ?
+            ORDER BY s.date, s.id
+        """, (item_id,))
+        balance = 0
+        for r in rows:
+            balance += r["qty_in"] - r["qty_out"]
+            r["balance"] = balance
+        return rows
+
+    def recent_remarks(self, limit=15):
+        """Most used 'issued to / remarks' values, for suggestions."""
+        rows = self.db.fetch_all("""
+            SELECT remarks FROM stock_register
+            WHERE issued_qty > 0 AND TRIM(COALESCE(remarks, '')) != ''
+            GROUP BY remarks ORDER BY COUNT(*) DESC LIMIT ?
+        """, (limit,))
+        return [r["remarks"] for r in rows]

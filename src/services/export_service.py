@@ -174,3 +174,31 @@ def write_exports_to_destination(folder):
     if not snap.exists():
         export_monthly_snapshot(year, month, snap)
         log.info("Wrote monthly snapshot %s", snap)
+
+
+def export_report(report, path):
+    """Write a Report (see report_service) to Excel with real numbers and formats."""
+    from utils.formatting import format_cell
+
+    number_formats = {"money": '#,##0.00', "int": '#,##0', "pct": '0"%"'}
+    wb = Workbook()
+    heading = report.title + (f" — {report.period}" if report.period else "")
+    rows = [list(r) for r in report.rows]
+    for r in rows:  # dates/months as readable text; numbers stay numbers
+        for i, (_, kind) in enumerate(report.columns):
+            if kind in ("date", "month"):
+                r[i] = format_cell(r[i], kind)
+    if report.totals:
+        rows.append(list(report.totals))
+    ws = _write_sheet(wb, report.title, [h for h, _ in report.columns], rows, heading=heading)
+    first_data_row = 4
+    for i, (_, kind) in enumerate(report.columns, 1):
+        if kind in number_formats:
+            for r in range(first_data_row, first_data_row + len(rows)):
+                ws.cell(row=r, column=i).number_format = number_formats[kind]
+    if report.totals:
+        for c in range(1, len(report.columns) + 1):
+            ws.cell(row=first_data_row + len(rows) - 1, column=c).font = Font(bold=True)
+    if report.note:
+        ws.cell(row=first_data_row + len(rows) + 1, column=1, value=report.note).font = Font(italic=True)
+    return _save(wb, path)

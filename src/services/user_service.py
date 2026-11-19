@@ -1,40 +1,39 @@
 import bcrypt
-import sqlite3
+
 from services.db_service import get_db
+
+MIN_PASSWORD_LENGTH = 4
 
 
 class UserService:
     def __init__(self):
         self.db = get_db()
 
-    def hash_password(self, plain_password: str) -> str:
-        return bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    @staticmethod
+    def hash_password(plain_password: str) -> str:
+        return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
-
-    def create_user(self, username: str, password: str) -> bool:
-        """Create a new user. Returns False if username already exists."""
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
         try:
-            hashed = self.hash_password(password)
-            self.db.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (username, hashed)
-            )
-            return True
-        except sqlite3.IntegrityError:
-            return False  # Duplicate username
-
-    def get_user(self, username: str):
-        return self.db.fetch_one(
-            "SELECT * FROM users WHERE username = ?",
-            (username,)
-        )
-
-    def login(self, username: str, password: str) -> bool:
-        user = self.get_user(username)
-        if not user:
+            return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+        except ValueError:  # malformed hash
             return False
 
-        stored_hash = user["password_hash"]
-        return self.verify_password(password, stored_hash)
+    def login(self, username: str, password: str) -> bool:
+        """Usernames ignore case and surrounding spaces; passwords are exact."""
+        user = self.db.fetch_one("SELECT * FROM users WHERE LOWER(username) = LOWER(?)",
+                                 ((username or "").strip(),))
+        return bool(user) and self.verify_password(password, user["password_hash"])
+
+    def change_password(self, username: str, current: str, new: str):
+        """Raises ValueError with a user-facing message if refused."""
+        if not self.login(username, current):
+            raise ValueError("The current password is not correct.")
+        if len(new) < MIN_PASSWORD_LENGTH:
+            raise ValueError(f"The new password must be at least {MIN_PASSWORD_LENGTH} characters.")
+        self.db.execute("UPDATE users SET password_hash = ? WHERE LOWER(username) = LOWER(?)",
+                        (self.hash_password(new), username.strip()))
+
+    def is_default_password(self, username: str) -> bool:
+        return username.strip().lower() == "admin" and self.login("admin", "admin")

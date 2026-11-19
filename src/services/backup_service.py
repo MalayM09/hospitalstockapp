@@ -483,8 +483,9 @@ class BackupService:
                 return f"{int(delta.total_seconds() // 3600)} hours ago"
             return f"{delta.days} days ago ({t:%d %b %Y})"
 
-        failing = [e.get("label", p) for p, e in status.items()
-                   if e.get("kind") == "folder" and not e.get("ok")]
+        # Only folders still configured count (a removed folder's old failure is ignored)
+        failing = [status[p].get("label", p) for p in configured
+                   if p in status and not status[p].get("ok")]
 
         if not configured and not last_offsite:
             return {"level": "danger",

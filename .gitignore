@@ -65,3 +65,9 @@ data/
 # Mac preview
 .venv/
 preview_data/
+
+# Design mockups (not part of the app)
+design_options/
+
+# Test / tool caches
+.pytest_cache/

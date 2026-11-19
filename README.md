@@ -1,127 +1,96 @@
-# Hospital Stock Management System
+# Lab Stock — Hospital Stock Management
 
-A desktop application for managing hospital/lab stock inventory, built with Python and PyQt6.
+Desktop app for a hospital laboratory store: purchases (vendor invoices), stock issues,
+stock and issue registers, reports, and automatic backups. Built with Python and PyQt6.
 
 ## Features
 
-- **Secure Login** - Password-protected access with bcrypt hashing
-- **Vendor Management** - Add, edit, delete vendors
-- **Item Management** - Manage inventory items
-- **Purchase Entry** - Record purchases with automatic tax calculation
-- **Stock Issue** - Issue stock with balance tracking
-- **Stock Register** - View current stock levels with search/filter
-- **Bill Details** - View, edit, delete purchase records
-- **Reports** - Daily, weekly, monthly, and vendor-wise reports
-- **Print & Export** - Print reports or export to Excel
-- **Backup & Restore** - Verified backups to this PC, extra folders (second drive,
-  Google Drive / OneDrive folder) and any plugged-in USB pendrive; after changes, daily,
-  and on close. Tiered retention (last 20, daily 60 days, weekly 26 weeks, monthly forever).
-  One-click restore, plus automatic restore offer on a new/damaged installation.
-- **Excel copies** - Daily full-data Excel export and a monthly stock statement saved
-  with every backup destination
-- **Error log** - Unexpected errors are shown and written to `logs/app.log`
+- **Purchases** — enter a whole vendor invoice (several items), GST as CGST+SGST or IGST,
+  invoice round-off, batch and expiry; duplicate-invoice warning; add a new vendor/item on the spot
+- **Stock issue** — live balance (including on a back date), "issued to" suggestions,
+  stock can never go negative on any date
+- **Registers** — Stock register (status filters, item history with running balance),
+  Issue register and Bills with date ranges, search, edit, delete, totals
+- **Reports** — stock statement (opening/received/issued/closing), purchases by
+  month/week/day, vendor-wise, item consumption, GST summary; Excel export and print
+- **Backups** — verified backups to this PC, extra folders (pendrive, Google Drive/OneDrive)
+  and any plugged-in pendrive; after changes, daily, and on close; tiered retention
+  (last 20, daily 60 days, weekly 26 weeks, monthly forever); one-click restore; a new
+  or damaged installation offers to restore automatically; daily Excel copies
+- **Account** — change password, large-text mode; errors are logged to `logs/app.log`
 
-## Data & Backups
+### Keyboard shortcuts
 
-All data lives in one folder (`data/` in development; `%LOCALAPPDATA%\HospitalStockApp`
-on Windows when packaged): `hospital.db`, `backups/`, `logs/`, `settings.json`.
+| Keys | Action | Keys | Action |
+|---|---|---|---|
+| Ctrl+D | Dashboard | Ctrl+S | Save (purchase / issue) |
+| Ctrl+N | New purchase | Esc | Clear the form |
+| Ctrl+I | Stock issue | Ctrl+F | Search |
+| Ctrl+R | Stock register | F5 | Refresh |
+| Ctrl+B | Bills | Enter | Next field / add item |
 
-**Important:** backups in `backups/` are on the same disk as the database. Open
-**Backup & Restore** and add at least one off-site location (pendrive or Google Drive
-folder). The dashboard shows a red warning until you do.
+## Running from source
 
-Schema changes are applied automatically by `src/models/migrations.py`
-(a backup is taken first).
-
-## Installation (For Development)
-
-### Prerequisites
-- Python 3.10 or higher
-- pip (Python package manager)
-
-### Setup
-
-1. Clone the repository:
-```bash
-git clone https://github.com/MalayM09/hospitalstockapp.git
-cd hospitalstockapp
-```
-
-2. Install dependencies:
 ```bash
 pip install -r requirements.txt
-```
-
-3. Run the application:
-```bash
 python run.py
 ```
 
-### Default Login
-- **Username:** `admin`
-- **Password:** `admin`
-
-## Download Pre-built Executable
-
-Go to the [Actions tab](https://github.com/MalayM09/hospitalstockapp/actions) on GitHub, click on the latest successful build, and download the executable from the Artifacts section.
-
-- **Windows:** Download `HospitalStockApp-Windows`
-- **Mac:** Download `HospitalStockApp-Mac`
-
-## Project Structure
-
-```
-hospitalstockapp/
-├── run.py                    # Entry point
-├── requirements.txt          # Python dependencies
-├── hospital_stock_app.spec   # PyInstaller configuration
-├── src/
-│   ├── main.py               # Main application
-│   ├── models/
-│   │   └── init_db.py        # Database schema
-│   ├── services/
-│   │   ├── db_service.py     # Database operations
-│   │   ├── backup_service.py # Auto-backup functionality
-│   │   ├── bill_service.py   # Bill management
-│   │   ├── stock_service.py  # Stock operations
-│   │   ├── item_service.py   # Item CRUD
-│   │   ├── vendor_service.py # Vendor CRUD
-│   │   └── user_service.py   # Authentication
-│   └── ui/
-│       ├── theme.py          # Application styling
-│       ├── login_window.py   # Login screen
-│       ├── dashboard_window.py
-│       └── ...               # Other UI windows
-└── data/
-    ├── hospital.db           # SQLite database
-    └── backups/              # Automatic backups
-```
+Default login: `admin` / `admin` — change it from the account menu (bottom-left).
 
 ## Previewing on a Mac
 
-- **`run_mac.command`** (double-click): sets everything up on first run, fills
-  `preview_data/` with sample data, and starts the app. Option 2 simulates the
-  hospital PC's 1366x768 screen so you can see what fits. Delete `preview_data/`
-  to reset the sample data.
-- **`build_mac.command`** (double-click): builds `dist/HospitalStockApp.app`
-  the same way the Windows `.exe` is built.
+- **`run_mac.command`** (double-click) — sets up on first run, fills `preview_data/` with
+  sample data and starts the app. Option 2 simulates a 1366×768 screen. Delete
+  `preview_data/` to reset.
+- **`build_mac.command`** (double-click) — builds `dist/HospitalStockApp.app`.
 
-Fonts and emoji icons differ slightly between macOS and Windows; for an exact
-check, run the Windows `.exe` from GitHub Actions in a Windows VM.
+## Building the Windows .exe
 
-## Building Executable Locally
+GitHub Actions runs the tests and builds `HospitalStockApp.exe` on every push to `main`
+and on pull requests (Actions tab → latest run → Artifacts). Locally:
 
 ```bash
-pip install pyinstaller
+pip install -r requirements-dev.txt
 pyinstaller hospital_stock_app.spec --clean
 ```
 
-The executable will be created in the `dist/` folder.
+## Tests
 
-## License
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
 
-This project is for personal/hospital use.
+## Data & backups
 
-## Author
+All data lives in one folder — `data/` when run from source, `%LOCALAPPDATA%\HospitalStockApp`
+on Windows: `hospital.db`, `backups/`, `logs/`, `settings.json`.
 
-Created by MalayM09
+**Backups in `backups/` are on the same disk as the database.** Open **Backup & Restore** and
+add at least one off-site location (pendrive or Google Drive folder); the dashboard stays red
+until you do. Schema changes are applied automatically by `src/models/migrations.py`
+(a backup is taken first).
+
+## Project structure
+
+```
+src/
+  main.py                 startup: crash handler, restore offer, migrations, sign-in
+  models/                 migrations.py (schema), seed_data.py (first run only)
+  services/               business logic, no UI
+    bill_service.py       invoices, edits, invoice round-off
+    stock_service.py      stock movements, negative-stock protection, item ledger
+    report_service.py     reports + dashboard figures
+    backup_service.py     backups, retention, restore;  backup_scheduler.py: when
+    export_service.py     Excel exports;  gst.py: tax maths
+    master_service.py     items & vendors (item_service.py, vendor_service.py)
+  ui/
+    theme.py              Clinical Teal design system (colours, font, stylesheet)
+    widgets.py            shared components (tables, fields, search combos, toasts…)
+    main_window.py        sidebar + pages;  login_window.py;  dialogs.py;  printing.py
+    pages/                one file per screen
+  assets/fonts/           Inter font (SIL Open Font License)
+tests/                    pytest suite (logic, backups, every screen)
+tools/demo_data.py        sample data for previews
+```
